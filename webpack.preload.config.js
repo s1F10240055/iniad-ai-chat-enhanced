@@ -2,7 +2,7 @@ const path = require("node:path");
 const rules = require("./webpack.rules");
 
 module.exports = {
-  entry: "./src/preload.ts",
+  entry: "./src/preload/preload.ts",
   target: "web",
   mode: "development",
   devtool: "source-map",
