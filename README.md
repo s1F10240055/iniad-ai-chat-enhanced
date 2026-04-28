@@ -56,15 +56,34 @@ Electron ウィンドウが立ち上がれば成功です。
 ```
 iniad-ai-chat-enhanced/
 ├── docs/
-│   ├── design.md        # 詳細設計書
-│   ├── assignment.md    # タスク割当表
-│   └── proposal.md      # 提案書
+│   ├── design.md         # 詳細設計書
+│   ├── assignment.md     # タスク割当表
+│   └── proposal.md       # 提案書
 ├── src/
-│   ├── index.js         # Main プロセス
-│   ├── preload.js       # Preload スクリプト
-│   ├── index.html       # Renderer HTML
-│   └── index.css        # スタイル
-├── forge.config.js      # electron-forge 設定
+│   ├── main/             # Main プロセス
+│   │   └── index.ts      # エントリポイント（BrowserWindow生成）
+│   ├── preload/          # Preload スクリプト
+│   │   ├── preload.ts    # contextBridge 定義
+│   │   └── index.d.ts    # Renderer 向け型宣言
+│   ├── renderer/         # Renderer プロセス（React）
+│   │   ├── index.html    # メインHTML
+│   │   ├── index.css     # スタイル
+│   │   ├── renderer.tsx  # React エントリ
+│   │   └── App.tsx       # ルートコンポーネント
+│   └── shared/
+│       └── types/        # 共通型定義
+│           ├── chat.ts   # ChatTurn, ChatResponse, Citation
+│           ├── settings.ts # AppSettings, AppStatus
+│           ├── search.ts # SearchResult, CacheEntry
+│           ├── errors.ts # AppError, ErrorCode
+│           └── index.ts  # Barrel export
+├── forge.config.ts       # electron-forge 設定
+├── webpack.main.config.js
+├── webpack.preload.config.js
+├── webpack.renderer.config.js
+├── webpack.rules.js
+├── webpack.plugins.js
+├── tsconfig.json
 └── package.json
 ```
 
