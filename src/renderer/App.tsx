@@ -25,6 +25,9 @@ const App: React.FC = () => {
     window.electronAPI?.getStatus?.().then((status) => {
       setMcpConnectionStatus(status.mcpStatus);
       setModelName(status.model);
+    }).catch(() => {
+      setMcpConnectionStatus("disconnected");
+      setModelName("GPT-5.4-nano");
     });
 
     return () => {
