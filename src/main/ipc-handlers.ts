@@ -30,7 +30,7 @@ const store = new InMemoryStore();
 const mcpClient = new McpClient();
 const webClient = new WebSearchClient();
 const orchestrator = new SearchOrchestrator(mcpClient, webClient);
-let abortController: AbortController | null = null;
+let activeController: AbortController | null = null;
 
 // ── Helper: broadcast MCP status to all windows ────
 
@@ -77,8 +77,12 @@ export function registerIpcHandlers(): void {
       throw new Error("INVALID_INPUT");
     }
 
+    if (activeController) {
+      throw new Error("CHAT_IN_PROGRESS");
+    }
+
     const settings = settingsStore.getRawSettings();
-    abortController = new AbortController();
+    activeController = new AbortController();
 
     try {
       const userMessage: ChatTurn = {
@@ -92,7 +96,7 @@ export function registerIpcHandlers(): void {
       const response: ChatResponse = await orchestrator.chatWithRAG(
         userText,
         settings,
-        abortController.signal
+        activeController.signal
       );
 
       const assistantMessage: ChatTurn = {
@@ -109,14 +113,14 @@ export function registerIpcHandlers(): void {
       const serialized = toSerializableError(error);
       throw new Error(serialized.message);
     } finally {
-      abortController = null;
+      activeController = null;
     }
   });
 
   ipcMain.handle("chat:cancel", async () => {
     return withErrorHandler(async () => {
-      abortController?.abort();
-      abortController = null;
+      activeController?.abort();
+      activeController = null;
     });
   });
 
