@@ -43,6 +43,11 @@ export interface SearchResult {
   relevanceScore?: number;
 }
 
+/** 検索ソースの共通インターフェース */
+export interface SearchSource {
+  search(query: string): Promise<{ success: boolean; results: SearchResult[]; error?: string }>;
+}
+
 /** 検索クライアントのキャッシュエントリ */
 export interface CacheEntry<T> {
   /** キャッシュされたデータ */
