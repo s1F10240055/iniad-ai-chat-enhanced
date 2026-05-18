@@ -22,13 +22,16 @@ const App: React.FC = () => {
       setMcpConnectionStatus(status);
     });
 
-    window.electronAPI?.getStatus?.().then((status) => {
-      setMcpConnectionStatus(status.mcpStatus);
-      setModelName(status.model);
-    }).catch(() => {
-      setMcpConnectionStatus("disconnected");
-      setModelName("GPT-5.4-nano");
-    });
+    window.electronAPI
+      ?.getStatus?.()
+      .then((status) => {
+        setMcpConnectionStatus(status.mcpStatus);
+        setModelName(status.model);
+      })
+      .catch(() => {
+        setMcpConnectionStatus("disconnected");
+        setModelName("GPT-5.4-nano");
+      });
 
     return () => {
       cleanup?.();
