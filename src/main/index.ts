@@ -36,7 +36,12 @@ const createWindow = (): void => {
 };
 
 app.whenReady().then(async () => {
-  await settingsStore.init();
+  try {
+    await settingsStore.init();
+  } catch (error) {
+    console.error("Settings init failed, falling back to defaults:", error);
+    await settingsStore.reset();
+  }
   createWindow();
   registerIpcHandlers();
 
