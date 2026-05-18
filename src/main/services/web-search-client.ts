@@ -81,6 +81,7 @@ export class WebSearchClient {
         for (const topic of data.RelatedTopics) {
           if ("Topics" in topic && topic.Topics) {
             for (const sub of topic.Topics) {
+              if (results.length >= 10) break;
               if (sub.Text && sub.FirstURL) {
                 results.push({
                   title: sub.Text.slice(0, 80),
