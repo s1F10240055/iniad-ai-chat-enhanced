@@ -109,7 +109,11 @@ export class WebSearchClient {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
 
-      if (message.includes("timed out") || message.includes("ETIMEDOUT") || message.includes("abort")) {
+      if (
+        message.includes("timed out") ||
+        message.includes("ETIMEDOUT") ||
+        message.includes("abort")
+      ) {
         return {
           success: false,
           results: [],

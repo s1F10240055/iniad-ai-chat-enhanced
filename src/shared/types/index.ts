@@ -14,7 +14,14 @@ export type {
 
 export { DEFAULT_SETTINGS } from "./settings";
 
-export type { SearchResult, CourseSummary, LectureLink, SlideLink, CacheEntry, SearchSource } from "./search";
+export type {
+  SearchResult,
+  CourseSummary,
+  LectureLink,
+  SlideLink,
+  CacheEntry,
+  SearchSource,
+} from "./search";
 
 export type { ErrorCode, SerializableError } from "./errors";
 export { AppError, toSerializableError } from "./errors";
