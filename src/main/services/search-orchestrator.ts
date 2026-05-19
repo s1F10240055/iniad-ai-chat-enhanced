@@ -57,7 +57,7 @@ export class SearchOrchestrator {
 
     results.sort((a, b) => (b.relevanceScore ?? 0) - (a.relevanceScore ?? 0));
 
-    return results;
+    return results.slice(0, 10);
   }
 
   /**
