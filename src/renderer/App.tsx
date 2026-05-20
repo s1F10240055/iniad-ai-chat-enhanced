@@ -1,53 +1,40 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { ChatView } from "./components/ChatView";
 import { ChatInput } from "./components/ChatInput";
 import { StatusBar } from "./components/StatusBar";
 import { SettingsView } from "./components/SettingsView";
 import { ChatTurn } from "../shared/types/chat";
+import type { McpStatus } from "../shared/types/settings";
 import "./index.css";
 
 /** 現在表示中のビュー */
 type ViewType = "chat" | "settings";
 
-// ダミーデータ（モック）
-const MOCK_MESSAGES: ChatTurn[] = [
-  {
-    id: crypto.randomUUID(),
-    role: "user",
-    content: "Pythonのリスト内包表記について教えてください",
-    timestamp: new Date().toISOString(),
-  },
-  {
-    id: crypto.randomUUID(),
-    role: "assistant",
-    content:
-      "リスト内包表記は、既存のリストなどから新しいリストを簡潔に生成するための構文です。\n例えば `[x*2 for x in range(5)]` のように記述します。",
-    citations: [
-      {
-        title: "Python基礎 第5回 スライド p.12",
-        url: "https://moocs.iniad.org/courses/2026/python-basic/05/slide#12",
-      },
-      {
-        title: "Python基礎 第5回 演習問題",
-        url: "https://moocs.iniad.org/courses/2026/python-basic/05/exercise",
-      },
-    ],
-    timestamp: new Date().toISOString(),
-  },
-];
-
 const App: React.FC = () => {
-  const [messages, setMessages] = useState<ChatTurn[]>(MOCK_MESSAGES);
+  const [messages, setMessages] = useState<ChatTurn[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [mcpConnectionStatus, _setMcpConnectionStatus] = useState<
-    "connected" | "disconnected" | "connecting"
-  >("connected");
+  const [mcpConnectionStatus, setMcpConnectionStatus] = useState<McpStatus>("disconnected");
+  const [modelName, setModelName] = useState("GPT-5.4-nano");
   const [currentView, setCurrentView] = useState<ViewType>("chat");
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    const cleanup = window.electronAPI?.onMcpStatusChange?.((status) => {
+      setMcpConnectionStatus(status);
+    });
+
+    window.electronAPI
+      ?.getStatus?.()
+      .then((status) => {
+        setMcpConnectionStatus(status.mcpStatus);
+        setModelName(status.model);
+      })
+      .catch(() => {
+        setMcpConnectionStatus("disconnected");
+        setModelName("GPT-5.4-nano");
+      });
+
     return () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      cleanup?.();
     };
   }, []);
 
@@ -57,8 +44,7 @@ const App: React.FC = () => {
     setCurrentView(target);
   };
 
-  const handleSend = (text: string) => {
-    // ユーザーのメッセージを追加
+  const handleSend = async (text: string) => {
     const newUserMsg: ChatTurn = {
       id: crypto.randomUUID(),
       role: "user",
@@ -68,17 +54,29 @@ const App: React.FC = () => {
     setMessages((prev) => [...prev, newUserMsg]);
     setIsLoading(true);
 
-    // AIの返答をシミュレート（1秒後）
-    timeoutRef.current = setTimeout(() => {
+    try {
+      const response = await window.electronAPI.sendChat(text);
+
       const newAiMsg: ChatTurn = {
         id: crypto.randomUUID(),
         role: "assistant",
-        content: `「${text}」ですね。モック画面なのでダミーの回答を返しています。本番ではここにAPIからの回答が入ります。`,
+        content: response.content,
+        citations: response.citations,
         timestamp: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, newAiMsg]);
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg: ChatTurn = {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: `エラーが発生しました: ${errMsg}`,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, errorMsg]);
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
   };
 
   const isChat = currentView === "chat";
@@ -150,7 +148,7 @@ const App: React.FC = () => {
         </main>
       </div>
 
-      <StatusBar mcpStatus={mcpConnectionStatus} model="GPT-5.4-nano (Mock)" />
+      <StatusBar mcpStatus={mcpConnectionStatus} model={modelName} />
     </div>
   );
 };

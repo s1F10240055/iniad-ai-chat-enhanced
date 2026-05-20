@@ -4,25 +4,56 @@
  * RendererプロセスからのIPCリクエストを処理するハンドラーを登録する。
  *
  * チャネル:
- * - chat:send: チャットメッセージを送信
+ * - chat:send: チャットメッセージを送信（RAG パイプライン）
  * - chat:cancel: チャット送信をキャンセル
  * - chat:list: チャット履歴を取得
  * - chat:clear: チャット履歴をクリア
  * - app:status: アプリケーションステータスを取得
+ * - settings:get: 設定値を取得
+ * - settings:set: 設定値を更新
+ * - settings:test-api: API接続テスト
+ * - settings:test-mcp: MCP接続テスト
  */
 
-import { ipcMain } from "electron";
+import { ipcMain, BrowserWindow } from "electron";
 import { toSerializableError } from "../shared/types/errors";
 import { InMemoryStore } from "./services/in-memory-store";
-import { MockChatService } from "./services/mock-chat-service";
+import { McpClient } from "./services/mcp-client";
+import { WebSearchClient } from "./services/web-search-client";
+import { SearchOrchestrator } from "./services/search-orchestrator";
+import { settingsStore } from "./services/settings-store";
+import type { ChatTurn } from "../shared/types/chat";
+import type { McpStatus } from "../shared/types/settings";
+import type { ChatResponse } from "../shared/types/chat";
 
 const store = new InMemoryStore();
-const chatService = new MockChatService(store);
+const mcpClient = new McpClient();
+const webClient = new WebSearchClient();
+const orchestrator = new SearchOrchestrator(mcpClient, webClient);
+let activeController: AbortController | null = null;
 
-/**
- * エラーハンドリングラッパー
- * 全IPCハンドラーのエラーをキャッチしてシリアライズ可能な形式に変換する
- */
+// ── Helper: broadcast MCP status to all windows ────
+
+function broadcastMcpStatus(status: McpStatus): void {
+  store.setMcpStatus(status);
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send("mcp:status", status);
+  }
+}
+
+async function connectMcp(username: string, password: string): Promise<void> {
+  broadcastMcpStatus("connecting");
+  try {
+    await mcpClient.connect(username, password);
+    broadcastMcpStatus("connected");
+  } catch (error) {
+    broadcastMcpStatus("disconnected");
+    throw error;
+  }
+}
+
+// ── Error handling wrapper ──────────────────────────
+
 async function withErrorHandler<T>(
   handler: () => Promise<T>
 ): Promise<
@@ -36,19 +67,60 @@ async function withErrorHandler<T>(
   }
 }
 
-/**
- * IPCハンドラーを登録する
- */
+// ── Register IPC handlers ───────────────────────────
+
 export function registerIpcHandlers(): void {
+  // ── チャット操作 ──
+
   ipcMain.handle("chat:send", async (_event, userText: string) => {
+    if (!userText || typeof userText !== "string" || userText.trim().length === 0) {
+      throw new Error("INVALID_INPUT");
+    }
+
+    if (activeController) {
+      throw new Error("CHAT_IN_PROGRESS");
+    }
+
+    const settings = settingsStore.getRawSettings();
+    activeController = new AbortController();
+
+    try {
+      const userMessage: ChatTurn = {
+        id: `msg_${Date.now()}_user`,
+        role: "user",
+        content: userText,
+        timestamp: new Date().toISOString(),
+      };
+      store.addMessage(userMessage);
+
+      const response: ChatResponse = await orchestrator.chatWithRAG(
+        userText,
+        settings,
+        activeController.signal
+      );
+
+      const assistantMessage: ChatTurn = {
+        id: `msg_${Date.now()}_ai`,
+        role: "assistant",
+        content: response.content,
+        citations: response.citations,
+        timestamp: new Date().toISOString(),
+      };
+      store.addMessage(assistantMessage);
+
+      return response;
+    } catch (error) {
+      const serialized = toSerializableError(error);
+      throw new Error(serialized.message);
+    } finally {
+      activeController = null;
+    }
+  });
+
+  ipcMain.handle("chat:cancel", async () => {
     return withErrorHandler(async () => {
-      if (!userText || typeof userText !== "string") {
-        throw new Error("INVALID_INPUT");
-      }
-      if (userText.trim().length === 0) {
-        throw new Error("EMPTY_INPUT");
-      }
-      return await chatService.sendChat(userText);
+      activeController?.abort();
+      activeController = null;
     });
   });
 
@@ -64,20 +136,87 @@ export function registerIpcHandlers(): void {
     });
   });
 
+  // ── ステータス ──
+
   ipcMain.handle("app:status", async () => {
-    return withErrorHandler(async () => {
-      return store.getAppStatus();
-    });
+    const settings = settingsStore.getRawSettings();
+    store.setModel(settings.model);
+    store.setHasApiKey(settingsStore.hasApiKey());
+    return store.getAppStatus();
   });
 
-  ipcMain.handle("chat:cancel", async () => {
-    return withErrorHandler(async () => {
-      chatService.cancelChat();
-    });
+  // ── 設定 ──
+
+  ipcMain.handle("settings:get", async () => {
+    return settingsStore.getSettings();
   });
+
+  ipcMain.handle("settings:set", async (_event, partial: Record<string, string>) => {
+    await settingsStore.updateSettings(partial);
+
+    // MOOCs 認証情報が更新された場合、MCP 接続を試行
+    if (partial.moocsUsername || partial.moocsPassword) {
+      const raw = settingsStore.getRawSettings();
+      if (raw.moocsUsername && raw.moocsPassword) {
+        try {
+          await connectMcp(raw.moocsUsername, raw.moocsPassword);
+        } catch (error) {
+          console.warn("[IPC] MCP connect after settings save failed:", error);
+        }
+      }
+    }
+  });
+
+  ipcMain.handle("settings:test-api", async () => {
+    const settings = settingsStore.getRawSettings();
+    if (!settings.apiKey) {
+      return { success: false, error: "API キーが設定されていません" };
+    }
+
+    try {
+      const url = `${settings.baseURL}/models`;
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${settings.apiKey}` },
+        signal: AbortSignal.timeout(10_000),
+      });
+
+      if (response.ok) {
+        return { success: true };
+      }
+      return { success: false, error: `API returned ${response.status}` };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { success: false, error: message };
+    }
+  });
+
+  ipcMain.handle("settings:test-mcp", async () => {
+    const settings = settingsStore.getRawSettings();
+    if (!settings.moocsUsername || !settings.moocsPassword) {
+      return { success: false, error: "MOOCs 認証情報が設定されていません" };
+    }
+
+    try {
+      await connectMcp(settings.moocsUsername, settings.moocsPassword);
+      return { success: true };
+    } catch (error) {
+      const err = toSerializableError(error);
+      return { success: false, error: err.message };
+    }
+  });
+
+  // ── 起動時の自動接続 ──
+  if (settingsStore.hasMoocsCredentials()) {
+    const raw = settingsStore.getRawSettings();
+    connectMcp(raw.moocsUsername, raw.moocsPassword).catch((error) => {
+      console.warn("[IPC] Auto MCP connect failed:", error);
+    });
+  }
 }
 
 export const testExports = {
   store,
-  chatService,
+  mcpClient,
+  webClient,
+  orchestrator,
 };
