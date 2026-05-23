@@ -122,7 +122,6 @@ const App: React.FC = () => {
     } catch (e) {
       console.error("Failed to cancel chat:", e);
     }
-    setIsLoading(false);
   };
 
   const handleEdit = async (id: string, newText: string) => {
