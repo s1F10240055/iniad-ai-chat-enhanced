@@ -128,18 +128,23 @@ const App: React.FC = () => {
     const index = messages.findIndex((m) => m.id === id);
     if (index === -1) return;
 
-    // ローカルのステートをスライス
+    // 失敗時に元に戻せるようバックアップを作成
+    const backupMessages = [...messages];
+
+    // ローカルのステートを先行してスライス
     setMessages((prev) => prev.slice(0, index));
 
-    // バックエンドの履歴をスライス
     try {
+      // バックエンドの履歴をスライス
       await window.electronAPI.sliceChat(id);
+      // 成功した場合のみ、新しいメッセージとして再送信
+      handleSend(newText);
     } catch (e) {
-      console.error("Failed to slice remote chat", e);
+      console.error("Failed to slice remote chat:", e);
+      // 失敗時はローカルの状態を元に戻し、ユーザーに通知する
+      setMessages(backupMessages);
+      alert("メッセージの編集（履歴の巻き戻し）に失敗しました。もう一度お試しください。");
     }
-
-    // 新しいメッセージとして再送信
-    handleSend(newText);
   };
 
   const isChat = currentView === "chat";
