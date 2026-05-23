@@ -10,6 +10,7 @@ interface MessageBubbleProps {
   onEdit?: (id: string, newText: string) => void;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const CodeBlock = ({ language, children, ...rest }: any) => {
   const [copied, setCopied] = useState(false);
 
@@ -37,10 +38,11 @@ const CodeBlock = ({ language, children, ...rest }: any) => {
       <SyntaxHighlighter
         {...rest}
         PreTag="div"
-        children={String(children).replace(/\n$/, "")}
         language={language}
         style={vscDarkPlus}
-      />
+      >
+        {String(children).replace(/\n$/, "")}
+      </SyntaxHighlighter>
     </div>
   );
 };
@@ -150,11 +152,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ turn, onEdit }) =>
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={{
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   code(props: any) {
-                    const { children, className, node, ...rest } = props;
+                    const { children, className, node: _node, ...rest } = props;
                     const match = /language-(\w+)/.exec(className || "");
                     return match ? (
-                      <CodeBlock language={match[1]} children={children} {...rest} />
+                      <CodeBlock language={match[1]} {...rest}>
+                        {children}
+                      </CodeBlock>
                     ) : (
                       <code {...rest} className={className}>
                         {children}
