@@ -41,7 +41,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
       return;
     }
 
-    if (e.key === "ArrowUp" && text === "") {
+    if (e.key === "ArrowUp" && text === "" && historyIndex === -1) {
       e.preventDefault();
       if (history.length > 0) {
         setText(history[0]);
