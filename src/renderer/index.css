@@ -164,6 +164,8 @@ body {
   font-size: 0.95rem;
   margin-bottom: 0.25rem;
   font-weight: 600;
+  display: flex;
+  align-items: center;
 }
 
 .message-bubble-wrapper.user .message-sender-name {
@@ -1039,9 +1041,15 @@ body {
 
 /* Stop button */
 .stop-button {
-  background-color: #ef4444 !important;
+  background-color: transparent !important;
+  color: #ef4444;
+  border: 1px solid var(--border-color);
+  width: 2rem;
+  height: 2rem;
 }
 
 .stop-button:hover {
-  background-color: #dc2626 !important;
+  background-color: rgba(239, 68, 68, 0.1) !important;
+  color: #f87171;
+  border-color: #ef4444;
 }

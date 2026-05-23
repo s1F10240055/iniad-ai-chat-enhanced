@@ -18,7 +18,7 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = ({ onStop }) => {
       </div>
       <div className="message-body">
         <div className="message-sender-name">AI アシスタント</div>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
           <div className="message-bubble assistant typing-indicator-bubble" style={{ width: "auto" }}>
             <span className="dot"></span>
             <span className="dot"></span>
