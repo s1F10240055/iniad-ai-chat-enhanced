@@ -21,6 +21,7 @@ import { InMemoryStore } from "./services/in-memory-store";
 import { McpClient } from "./services/mcp-client";
 import { WebSearchClient } from "./services/web-search-client";
 import { SearchOrchestrator } from "./services/search-orchestrator";
+import { loginViaBrowser } from "./services/iniad-login";
 import { settingsStore } from "./services/settings-store";
 import type { ChatTurn } from "../shared/types/chat";
 import type { McpStatus } from "../shared/types/settings";
@@ -96,7 +97,8 @@ export function registerIpcHandlers(): void {
       const response: ChatResponse = await orchestrator.chatWithRAG(
         userText,
         settings,
-        activeController.signal
+        activeController.signal,
+        store.getHistory()
       );
 
       const assistantMessage: ChatTurn = {
@@ -153,18 +155,6 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle("settings:set", async (_event, partial: Record<string, string>) => {
     await settingsStore.updateSettings(partial);
-
-    // MOOCs 認証情報が更新された場合、MCP 接続を試行
-    if (partial.moocsUsername || partial.moocsPassword) {
-      const raw = settingsStore.getRawSettings();
-      if (raw.moocsUsername && raw.moocsPassword) {
-        try {
-          await connectMcp(raw.moocsUsername, raw.moocsPassword);
-        } catch (error) {
-          console.warn("[IPC] MCP connect after settings save failed:", error);
-        }
-      }
-    }
   });
 
   ipcMain.handle("settings:test-api", async () => {
@@ -180,10 +170,19 @@ export function registerIpcHandlers(): void {
         signal: AbortSignal.timeout(10_000),
       });
 
-      if (response.ok) {
-        return { success: true };
+      if (!response.ok) {
+        return { success: false, error: `API returned ${response.status}` };
       }
-      return { success: false, error: `API returned ${response.status}` };
+
+      const data = (await response.json()) as { data?: unknown[]; error?: { message?: string } };
+      if (data.error) {
+        return { success: false, error: data.error.message || "認証エラー" };
+      }
+      if (!data.data || !Array.isArray(data.data)) {
+        return { success: false, error: "APIレスポンスが不正です" };
+      }
+
+      return { success: true };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return { success: false, error: message };
@@ -196,22 +195,13 @@ export function registerIpcHandlers(): void {
       return { success: false, error: "MOOCs 認証情報が設定されていません" };
     }
 
-    try {
-      await connectMcp(settings.moocsUsername, settings.moocsPassword);
-      return { success: true };
-    } catch (error) {
-      const err = toSerializableError(error);
-      return { success: false, error: err.message };
-    }
+    return loginViaBrowser(
+      settings.moocsUsername,
+      settings.moocsPassword,
+      mcpClient,
+      broadcastMcpStatus
+    );
   });
-
-  // ── 起動時の自動接続 ──
-  if (settingsStore.hasMoocsCredentials()) {
-    const raw = settingsStore.getRawSettings();
-    connectMcp(raw.moocsUsername, raw.moocsPassword).catch((error) => {
-      console.warn("[IPC] Auto MCP connect failed:", error);
-    });
-  }
 }
 
 export const testExports = {

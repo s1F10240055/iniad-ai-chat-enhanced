@@ -211,6 +211,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
   const handleTestApi = async () => {
     setApiTestResult({ status: "testing" });
     try {
+      // Save settings first so the test handler has the latest values
+      const partial: Partial<AppSettings> = {};
+      for (const field of editedFields) {
+        partial[field] = settings[field];
+      }
+      if (Object.keys(partial).length > 0 && window.electronAPI?.saveSettings) {
+        await window.electronAPI.saveSettings(partial);
+        setEditedFields(new Set());
+      }
+
       if (window.electronAPI?.testApiConnection) {
         const result = await window.electronAPI.testApiConnection();
         setApiTestResult({
@@ -218,7 +228,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
           message: result.success ? "接続成功" : result.error || "接続失敗",
         });
       } else {
-        // モック動作
         setApiTestResult({ status: "success", message: "接続成功（モック）" });
       }
     } catch (e) {
@@ -232,14 +241,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
   const handleTestMcp = async () => {
     setMcpTestResult({ status: "testing" });
     try {
+      // Save settings first so the login handler has the latest credentials
+      const partial: Partial<AppSettings> = {};
+      for (const field of editedFields) {
+        partial[field] = settings[field];
+      }
+      if (Object.keys(partial).length > 0 && window.electronAPI?.saveSettings) {
+        await window.electronAPI.saveSettings(partial);
+        setEditedFields(new Set());
+      }
+
       if (window.electronAPI?.testMcpConnection) {
         const result = await window.electronAPI.testMcpConnection();
         setMcpTestResult({
           status: result.success ? "success" : "error",
-          message: result.success ? "接続成功" : result.error || "接続失敗",
+          message: result.success ? "ログイン成功・接続完了" : result.error || "接続失敗",
         });
       } else {
-        // モック動作
         setMcpTestResult({ status: "success", message: "接続成功（モック）" });
       }
     } catch (e) {
@@ -467,7 +485,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
             INIAD MOOCs 認証
           </h3>
           <p className="settings-section-description">
-            MOOCs資料の検索に使用します。学籍番号とパスワードを入力してください。
+            学籍番号とパスワードを入力後、「ログインして接続」を押してください。
+            INIADのログイン画面が開き、認証成功後に自動でMCPサーバーに接続します。
           </p>
 
           <div className="settings-field">
@@ -530,7 +549,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
             {errors.moocsPassword && <span className="settings-error">{errors.moocsPassword}</span>}
           </div>
 
-          {renderTestButton("MCP接続テスト", mcpTestResult, handleTestMcp)}
+          {renderTestButton("ログインして接続", mcpTestResult, handleTestMcp)}
         </section>
       </div>
 

@@ -1,16 +1,3 @@
-/**
- * McpClient - INIAD-MOOCs-MCP サーバとの通信クライアント
- *
- * 役割 C (C01/C02/C05): MCP stdio 通信・ツール呼び出し・エラー分類
- *
- * 機能:
- * - @rarandeyo/iniad-moocs-mcp を子プロセスとして自動起動・管理
- * - MOOCs 資料検索（コース・講義・スライドの取得とキーワードフィルタリング）
- * - 検索結果キャッシュ（TTL 5分）
- * - エラー分類（接続失敗・タイムアウト・認証エラー等）
- * - 接続状態管理（connected / disconnected / connecting）
- */
-
 import { Client } from "@modelcontextprotocol/sdk/client/index";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio";
 import { createRequire } from "module";
@@ -26,65 +13,22 @@ import type {
 } from "../../shared/types/search";
 import type { McpStatus } from "../../shared/types/settings";
 
-// ──────────────────────────────────────────────
-// Constants
-// ──────────────────────────────────────────────
-
-/** MCP ツール呼び出しタイムアウト（Playwright のページロードを考慮） */
 const TOOL_TIMEOUT_MS = 30_000;
-
-/** MCP 接続タイムアウト */
 const CONNECT_TIMEOUT_MS = 15_000;
+const CACHE_TTL_MS = 5 * 60 * 1000;
 
-/** 検索結果キャッシュの TTL（ミリ秒） */
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-
-// ──────────────────────────────────────────────
-// McpClient
-// ──────────────────────────────────────────────
-
-/**
- * MCP クライアント
- *
- * INIAD-MOOCs-MCP サーバを stdio で起動し、ツール呼び出しを通じて
- * MOOCs の講義資料を検索する。
- *
- * @example
- * ```ts
- * const mcpClient = new McpClient();
- * await mcpClient.connect("s1F10XXXXXX", "password");
- * const { success, results } = await mcpClient.searchMoocs("Python");
- * await mcpClient.disconnect();
- * ```
- */
 export class McpClient {
   private status: McpStatus = "disconnected";
   private client: Client | null = null;
   private transport: StdioClientTransport | null = null;
   private currentSessionId: string | null = null;
   private cache = new Map<string, Map<string, { data: SearchResult[]; expiresAt: number }>>();
+  private loggedIn = false;
 
-  // ── 接続状態 ──────────────────────────────
-
-  /**
-   * 現在の接続状態を取得する
-   */
   getStatus(): McpStatus {
     return this.status;
   }
 
-  // ── 接続・切断 ────────────────────────────
-
-  /**
-   * MCP サーバに接続する
-   *
-   * @rarandeyo/iniad-moocs-mcp を子プロセスとして stdio で起動し、
-   * MCP クライアントを初期化する。
-   *
-   * @param username - INIAD MOOCs ユーザー名（学籍番号）
-   * @param password - INIAD MOOCs パスワード
-   * @throws {AppError} 接続に失敗した場合
-   */
   async connect(username: string, password: string): Promise<void> {
     if (this.status === "connected" || this.status === "connecting") {
       await this.disconnect();
@@ -93,19 +37,15 @@ export class McpClient {
     this.status = "connecting";
 
     try {
-      // セッションIDを生成
       this.currentSessionId = randomUUID();
 
-      // MCP サーバの CLI エントリポイントを解決
-      // cli.js は "exports" に含まれていないため、package.json 経由でパスを解決
       const require = createRequire(__filename);
       const pkgDir = path.dirname(require.resolve("@rarandeyo/iniad-moocs-mcp/package.json"));
       const cliPath = path.join(pkgDir, "cli.js");
 
-      // stdio トランスポートで子プロセス起動
       this.transport = new StdioClientTransport({
         command: "node",
-        args: [cliPath, "--headless"],
+        args: [cliPath],
         env: {
           ...process.env,
           INIAD_USERNAME: username,
@@ -115,7 +55,6 @@ export class McpClient {
 
       this.client = new Client({ name: "iniad-ai-chat", version: "1.0.0" }, { capabilities: {} });
 
-      // 接続（SDK connect には timeout option がないため Promise.race で制御）
       await Promise.race([
         this.client.connect(this.transport),
         new Promise<never>((_, reject) =>
@@ -134,11 +73,7 @@ export class McpClient {
     }
   }
 
-  /**
-   * MCP サーバから切断する
-   */
   async disconnect(): Promise<void> {
-    // セッションのキャッシュをクリア
     if (this.currentSessionId) {
       this.cache.delete(this.currentSessionId);
     }
@@ -146,38 +81,23 @@ export class McpClient {
     await this.cleanupResources();
     this.status = "disconnected";
     this.currentSessionId = null;
+    this.loggedIn = false;
   }
 
-  // ── MOOCs 検索 ────────────────────────────
+  // ── MOOCs 検索 ────────────────────────────────
 
-  /**
-   * MOOCs 資料を検索する
-   *
-   * MCP ツールを呼び出してコース・講義・スライドの情報を取得し、
-   * クエリ文字列でタイトルをフィルタリングして返す。
-   * 結果はキャッシュされる（TTL 5分）。
-   *
-   * @param query - 検索キーワード
-   * @returns 検索結果と成功/失敗のフラグ
-   */
   async searchMoocs(
     query: string
-  ): Promise<{ success: boolean; results: SearchResult[]; error?: string }> {
+  ): Promise<{ success: boolean; results: SearchResult[]; error?: string; debug?: string }> {
     if (this.status !== "connected" || !this.client) {
-      return {
-        success: false,
-        results: [],
-        error: "MCP client is not connected",
-      };
+      return { success: false, results: [], error: "MCP client is not connected" };
     }
 
-    // 空白のみのクエリを拒否（matchesQuery が全マッチ、computeRelevance が NaN になるのを防止）
     const trimmedQuery = query.trim();
     if (!trimmedQuery) {
       return { success: true, results: [] };
     }
 
-    // キャッシュチェック
     const cacheKey = query.toLowerCase().trim();
     let sessionCache = this.currentSessionId ? this.cache.get(this.currentSessionId) : undefined;
     const cached = sessionCache?.get(cacheKey);
@@ -186,23 +106,35 @@ export class McpClient {
     }
 
     try {
-      // 1. コース・講義・スライドを並列取得
-      const [courses, lectures, slides] = await Promise.all([
-        this.fetchCourses(),
+      // 初回検索時にログイン（MCPサーバーのPlaywrightでINIADにログイン）
+      let courses: CourseSummary[] = [];
+      if (!this.loggedIn) {
+        const loginResult = await this.callToolSafe("loginToIniadMoocsWithIniadAccount");
+        const parsed = loginResult as { isError?: boolean } | undefined;
+        if (parsed?.isError) {
+          return { success: false, results: [], error: "INIAD MOOCsへのログインに失敗しました" };
+        }
+        courses = this.parseToolResult<CourseSummary>(loginResult, "login");
+        this.loggedIn = true;
+        console.log(`[McpClient] Login successful, found ${courses.length} courses`);
+      } else {
+        courses = await this.fetchCourses();
+      }
+
+      const [lectures, slides] = await Promise.all([
         this.fetchLectureLinks(),
         this.fetchSlideLinks(),
       ]);
 
-      // 4. クエリでフィルタリングして SearchResult[] に変換
       const normalizedQuery = trimmedQuery.toLowerCase();
       const results: SearchResult[] = [];
 
-      // コースをフィルタリング
       for (const course of courses) {
+        if (!course.title) continue;
         if (this.matchesQuery(course.title, normalizedQuery)) {
           results.push({
             title: course.title,
-            url: course.url,
+            url: course.url ?? "",
             snippet: course.description ?? `INIAD MOOCs コース: ${course.title}`,
             source: "moocs",
             relevanceScore: this.computeRelevance(course.title, normalizedQuery),
@@ -210,12 +142,12 @@ export class McpClient {
         }
       }
 
-      // 講義リンクをフィルタリング
       for (const lecture of lectures) {
+        if (!lecture.title) continue;
         if (this.matchesQuery(lecture.title, normalizedQuery)) {
           results.push({
             title: lecture.title,
-            url: lecture.url,
+            url: lecture.url ?? "",
             snippet: `INIAD MOOCs 講義: ${lecture.title}`,
             source: "moocs",
             relevanceScore: this.computeRelevance(lecture.title, normalizedQuery),
@@ -223,12 +155,12 @@ export class McpClient {
         }
       }
 
-      // スライドリンクをフィルタリング
       for (const slide of slides) {
+        if (!slide.title) continue;
         if (this.matchesQuery(slide.title, normalizedQuery)) {
           results.push({
             title: slide.title,
-            url: slide.url,
+            url: slide.url ?? "",
             snippet: `INIAD MOOCs スライド: ${slide.title}`,
             source: "moocs",
             relevanceScore: this.computeRelevance(slide.title, normalizedQuery),
@@ -236,10 +168,8 @@ export class McpClient {
         }
       }
 
-      // 関連度スコアで降順ソート
       results.sort((a, b) => (b.relevanceScore ?? 0) - (a.relevanceScore ?? 0));
 
-      // キャッシュに保存
       if (!sessionCache) {
         sessionCache = new Map();
         this.cache.set(this.currentSessionId!, sessionCache);
@@ -249,49 +179,42 @@ export class McpClient {
         expiresAt: Date.now() + CACHE_TTL_MS,
       });
 
-      return { success: true, results };
+      const tokens = this.tokenizeQuery(normalizedQuery);
+      const courseTitles = courses.map((c) => c.title).filter(Boolean);
+      console.log(
+        `[McpClient] searchMoocs: query="${trimmedQuery}", tokens=${JSON.stringify(tokens)}, ` +
+        `courses=${courses.length}(${JSON.stringify(courseTitles.slice(0, 5))}), ` +
+        `lectures=${lectures.length}, slides=${slides.length}, matched=${results.length}`
+      );
+
+      return {
+        success: true,
+        results,
+        debug: `courses=${courses.length}[${courseTitles.slice(0, 3).join(", ")}], lectures=${lectures.length}, slides=${slides.length}, tokens=${tokens.join("|")}, matched=${results.length}`,
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
 
       if (message.includes("timed out") || message.includes("ETIMEDOUT")) {
-        return {
-          success: false,
-          results: [],
-          error: `MCP tool call timed out: ${message}`,
-        };
+        return { success: false, results: [], error: `MCP tool call timed out: ${message}` };
       }
 
-      return {
-        success: false,
-        results: [],
-        error: `MOOCs search failed: ${message}`,
-      };
+      return { success: false, results: [], error: `MOOCs search failed: ${message}` };
     }
   }
 
-  // ── ツール呼び出しヘルパー ──────────────────
+  // ── ツール呼び出しヘルパー ──────────────────────
 
-  /**
-   * MCP ツールを安全に呼び出す
-   *
-   * まず client.callTool() を試行し、SDK の厳格なバリデーションに
-   * 失敗した場合は client.request() にフォールバックする。
-   * iniad-moocs-mcp v0.0.4 は古い SDK でビルドされているため、
-   * 新しい SDK のスキーマ検証を通らない場合がある。
-   */
   private async callToolSafe(toolName: string, args?: Record<string, unknown>): Promise<unknown> {
     if (!this.client) {
       throw new Error("MCP client is not initialized");
     }
 
     try {
-      // 標準 callTool を試行（SDK ネイティブ timeout）
-      const result = await this.client.callTool({ name: toolName, arguments: args }, undefined, {
+      return await this.client.callTool({ name: toolName, arguments: args }, undefined, {
         timeout: TOOL_TIMEOUT_MS,
       });
-      return result;
     } catch (callToolError) {
-      // バリデーションエラーの場合、client.request() でフォールバック
       const errMsg = callToolError instanceof Error ? callToolError.message : "";
 
       if (
@@ -300,149 +223,99 @@ export class McpClient {
         errMsg.includes("schema") ||
         errMsg.includes("safeParse")
       ) {
-        // 緩いスキーマでリトライ
-        const result = await this.client.request(
-          {
-            method: "tools/call",
-            params: { name: toolName, arguments: args ?? {} },
-          },
+        return await this.client.request(
+          { method: "tools/call", params: { name: toolName, arguments: args ?? {} } },
           z.any(),
           { timeout: TOOL_TIMEOUT_MS }
         );
-        return result;
       }
 
-      // バリデーション以外のエラーはそのまま投げる
       throw callToolError;
     }
   }
 
-  /**
-   * コース一覧を取得する
-   */
   private async fetchCourses(): Promise<CourseSummary[]> {
-    // セッションのキャッシュを初期化
     if (this.currentSessionId && !this.cache.has(this.currentSessionId)) {
       this.cache.set(this.currentSessionId, new Map());
     }
-
-    const result = (await this.callToolSafe("listCourses")) as {
-      content?: Array<{ type: string; text?: string }>;
-    };
-
+    const result = await this.callToolSafe("listCourses");
     return this.parseToolResult<CourseSummary>(result, "listCourses");
   }
 
-  /**
-   * 講義リンク一覧を取得する
-   */
   private async fetchLectureLinks(): Promise<LectureLink[]> {
-    const result = (await this.callToolSafe("listLectureLinks")) as {
-      content?: Array<{ type: string; text?: string }>;
-    };
-
+    const result = await this.callToolSafe("listLectureLinks");
     return this.parseToolResult<LectureLink>(result, "listLectureLinks");
   }
 
-  /**
-   * スライドリンク一覧を取得する
-   */
   private async fetchSlideLinks(): Promise<SlideLink[]> {
-    const result = (await this.callToolSafe("listSlideLinks")) as {
-      content?: Array<{ type: string; text?: string }>;
-    };
-
+    const result = await this.callToolSafe("listSlideLinks");
     return this.parseToolResult<SlideLink>(result, "listSlideLinks");
   }
 
-  /**
-   * MCP ツールの結果をパースする
-   *
-   * MCP ツールの戻り値は `content` 配列に格納される。
-   * text タイプのコンテンツを JSON としてパースして返す。
-   */
   private parseToolResult<T>(result: unknown, _toolName: string): T[] {
-    if (!result || typeof result !== "object") {
-      return [];
-    }
+    if (!result || typeof result !== "object") return [];
 
     const typedResult = result as {
       content?: Array<{ type: string; text?: string }>;
     };
 
-    if (!typedResult.content || !Array.isArray(typedResult.content)) {
-      return [];
-    }
-
-    let hadTextItems = false;
+    if (!typedResult.content || !Array.isArray(typedResult.content)) return [];
 
     for (const item of typedResult.content) {
       if (item.type === "text" && item.text) {
-        hadTextItems = true;
         try {
           const parsed = JSON.parse(item.text);
-          if (Array.isArray(parsed)) {
-            return parsed as T[];
+
+          if (Array.isArray(parsed)) return parsed as T[];
+
+          if (parsed && typeof parsed === "object") {
+            for (const value of Object.values(parsed)) {
+              if (Array.isArray(value)) return value as T[];
+            }
           }
-          // オブジェクトの場合は配列にラップ
-          return [parsed] as T[];
         } catch {
-          // JSON パース失敗 → 次のアイテムを試す
           continue;
         }
       }
     }
 
-    // 全テキストアイテムがパース失敗 → MCP レスポンス異常の可能性
-    if (hadTextItems) {
-      console.warn(
-        `[McpClient] parseToolResult: all text items failed JSON parse for tool "${_toolName}"`
-      );
-    }
-
     return [];
   }
 
-  // ── テキストマッチング ──────────────────────
+  // ── テキストマッチング ──────────────────────────
 
-  /**
-   * タイトルがクエリにマッチするか判定する
-   */
-  private matchesQuery(title: string, normalizedQuery: string): boolean {
-    const normalizedTitle = title.toLowerCase();
-    // クエリをスペース/記号で分割し、すべてのトークンがタイトルに含まれるか
-    const tokens = normalizedQuery.split(/[\s\-_.]+/).filter((t) => t.length > 0);
-    return tokens.every((token) => normalizedTitle.includes(token));
+  private tokenizeQuery(query: string): string[] {
+    return query
+      .toLowerCase()
+      .split(/[のはがをにでともへからまでについてまたやでもの、。！？・\s\-_.：:；;（）()「」『』【】\[\]]+/)
+      .filter((t) => t.length >= 2);
   }
 
-  /**
-   * クエリとの関連度スコアを計算する（0〜1）
-   */
+  private matchesQuery(title: string, normalizedQuery: string): boolean {
+    const normalizedTitle = title.toLowerCase();
+    const tokens = this.tokenizeQuery(normalizedQuery);
+    if (tokens.length === 0) return false;
+    return tokens.some((token) => normalizedTitle.includes(token));
+  }
+
   private computeRelevance(title: string, normalizedQuery: string): number {
     const lower = title.toLowerCase();
-    const tokens = normalizedQuery.split(/[\s\-_.]+/).filter((t) => t.length > 0);
+    const tokens = this.tokenizeQuery(normalizedQuery);
+    if (tokens.length === 0) return 0;
 
     let matched = 0;
     for (const token of tokens) {
-      if (lower.includes(token)) {
-        matched++;
-      }
+      if (lower.includes(token)) matched++;
     }
 
-    // 完全一致ボーナス
-    const bonus = lower === normalizedQuery ? 0.1 : 0;
+    const bonus = tokens.every((t) => lower.includes(t)) ? 0.1 : 0;
     return Math.min(1, matched / tokens.length + bonus);
   }
 
-  // ── エラー分類 ────────────────────────────
+  // ── エラー分類 ──────────────────────────────────
 
-  /**
-   * エラーを分類して AppError に変換する
-   */
   private classifyError(error: unknown): AppError {
-    if (error instanceof AppError) {
-      return error;
-    }
+    if (error instanceof AppError) return error;
 
     const message = error instanceof Error ? error.message : String(error);
 
@@ -460,43 +333,22 @@ export class McpClient {
     return new AppError("MCP_CONNECTION_FAILED", `MCP connection failed: ${message}`);
   }
 
-  // ── クリーンアップ ──────────────────────────
+  // ── クリーンアップ ──────────────────────────────
 
-  /**
-   * リソースをクリーンアップする
-   */
   private async cleanupResources(): Promise<void> {
-    try {
-      await this.client?.close();
-    } catch {
-      // クリーンアップエラーは無視
-    }
-
-    try {
-      this.transport?.close?.();
-    } catch {
-      // クリーンアップエラーは無視
-    }
-
+    try { await this.client?.close(); } catch {}
+    try { this.transport?.close?.(); } catch {}
     this.client = null;
     this.transport = null;
   }
 
-  /**
-   * 期限切れのキャッシュエントリを削除する
-   */
   cleanupCache(): void {
     const now = Date.now();
     for (const [sessionId, sessionCache] of this.cache) {
       for (const [key, entry] of sessionCache) {
-        if (entry.expiresAt <= now) {
-          sessionCache.delete(key);
-        }
+        if (entry.expiresAt <= now) sessionCache.delete(key);
       }
-      // セッションキャッシュが空になったらセッション自体を削除
-      if (sessionCache.size === 0) {
-        this.cache.delete(sessionId);
-      }
+      if (sessionCache.size === 0) this.cache.delete(sessionId);
     }
   }
 }
