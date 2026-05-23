@@ -52,21 +52,6 @@ async function connectMcp(username: string, password: string): Promise<void> {
   }
 }
 
-// ── Error handling wrapper ──────────────────────────
-
-async function withErrorHandler<T>(
-  handler: () => Promise<T>
-): Promise<
-  { success: true; data: T } | { success: false; error: { code: string; message: string } }
-> {
-  try {
-    const data = await handler();
-    return { success: true, data };
-  } catch (error) {
-    return { success: false, error: toSerializableError(error) };
-  }
-}
-
 // ── Register IPC handlers ───────────────────────────
 
 export function registerIpcHandlers(): void {
