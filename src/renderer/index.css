@@ -217,7 +217,7 @@ body {
   margin-bottom: 0.25rem;
   font-weight: 600;
   display: flex;
-align-items: center;
+  align-items: center;
 }
 
 .message-bubble-wrapper.user .message-sender-name {
@@ -793,7 +793,6 @@ align-items: center;
    UX Enhancements (A99)
    ============================================ */
 
-/* System Message */
 .code-block-header {
   display: flex;
   justify-content: space-between;
@@ -806,6 +805,7 @@ align-items: center;
   border-bottom: 1px solid var(--border-color);
 }
 
+/* System Message */
 .message-system {
   display: flex;
   justify-content: center;
