@@ -6,9 +6,10 @@ import { TypingIndicator } from "./TypingIndicator";
 interface ChatViewProps {
   messages: ChatTurn[];
   isLoading?: boolean;
+  onStop?: () => void;
 }
 
-export const ChatView: React.FC<ChatViewProps> = ({ messages, isLoading }) => {
+export const ChatView: React.FC<ChatViewProps> = ({ messages, isLoading, onStop }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -25,7 +26,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ messages, isLoading }) => {
       ) : (
         messages.map((msg) => <MessageBubble key={msg.id} turn={msg} />)
       )}
-      {isLoading && <TypingIndicator />}
+      {isLoading && <TypingIndicator onStop={onStop} />}
       <div ref={bottomRef} />
     </div>
   );

@@ -2,11 +2,10 @@ import React, { useState, useRef, useEffect } from "react";
 
 interface ChatInputProps {
   onSend: (text: string) => void;
-  onStop?: () => void;
   disabled?: boolean;
 }
 
-export const ChatInput: React.FC<ChatInputProps> = ({ onSend, onStop, disabled }) => {
+export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -50,20 +49,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, onStop, disabled }
           disabled={disabled}
           rows={1}
         />
-        {disabled && onStop ? (
-          <button type="button" className="chat-input-button stop-button" onClick={onStop} aria-label="Stop generation" title="生成を停止">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-              <rect x="6" y="6" width="12" height="12" rx="2" ry="2"></rect>
-            </svg>
-          </button>
-        ) : (
-          <button type="submit" className="chat-input-button send-button" disabled={disabled || !text.trim()} aria-label="Send message" title="送信">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="22" y1="2" x2="11" y2="13"></line>
-              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-            </svg>
-          </button>
-        )}
+        <button type="submit" className="chat-input-button send-button" disabled={disabled || !text.trim()} aria-label="Send message" title="送信">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
       </form>
     </div>
   );
