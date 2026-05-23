@@ -106,13 +106,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        // Main プロセスの IPC ハンドラが未登録の場合はスキップ
         if (window.electronAPI?.getSettings) {
           const loaded = await window.electronAPI.getSettings();
           setSettings({ ...DEFAULT_SETTINGS, ...loaded });
         }
-      } catch {
-        // IPC ハンドラ未登録時のエラーは無視（モック動作）
+      } catch (e) {
+        console.error("Failed to load settings:", e);
       }
     };
     loadSettings();
@@ -218,8 +217,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
           message: result.success ? "接続成功" : result.error || "接続失敗",
         });
       } else {
-        // モック動作
-        setApiTestResult({ status: "success", message: "接続成功（モック）" });
+        throw new Error("API Connection handler is not registered");
       }
     } catch (e) {
       setApiTestResult({
@@ -239,8 +237,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
           message: result.success ? "接続成功" : result.error || "接続失敗",
         });
       } else {
-        // モック動作
-        setMcpTestResult({ status: "success", message: "接続成功（モック）" });
+        throw new Error("MCP Connection handler is not registered");
       }
     } catch (e) {
       setMcpTestResult({
