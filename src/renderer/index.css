@@ -681,27 +681,39 @@ body {
    View Transitions (A09)
    ============================================ */
 
-/* 両ビューを重ねて配置し、opacity で滑らかに切替 */
+.views-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 両ビューを重ねて配置し、opacity と transform で滑らかに切替 */
 .view-layer {
   display: flex;
   flex-direction: column;
-  flex: 1;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   overflow: hidden;
-  transition: opacity 0.25s ease, visibility 0.25s ease;
-  will-change: opacity;
+  transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0.3s ease;
+  will-change: opacity, transform;
 }
 
 .view-layer.view-active {
   opacity: 1;
+  transform: translateY(0) scale(1);
   visibility: visible;
+  pointer-events: auto;
+  z-index: 1;
 }
 
 .view-layer.view-hidden {
   opacity: 0;
+  transform: translateY(10px) scale(0.98);
   visibility: hidden;
-  height: 0;
-  overflow: hidden;
-  flex: 0;
   pointer-events: none;
+  z-index: 0;
 }
 
