@@ -58,7 +58,18 @@ export class SettingsStore {
     if (!this.cache) {
       throw new Error("SettingsStore not initialized. Call init() first.");
     }
-    return { ...this.cache };
+
+    // セキュリティのため、フロントエンド（Renderer）へ返す際はマスクする
+    // 本来の値が必要なバックエンド処理は getRawSettings() を使用する
+    const masked = { ...this.cache };
+    if (masked.apiKey) {
+      masked.apiKey = "********";
+    }
+    if (masked.moocsPassword) {
+      masked.moocsPassword = "********";
+    }
+
+    return masked;
   }
 
   /**
@@ -96,11 +107,12 @@ export class SettingsStore {
       ] as const;
 
       for (const [key, value] of Object.entries(partialSettings)) {
-        // バリデーション: 既知のキー && 文字列型 && 空文字でない
+        // バリデーション: 既知のキー && 文字列型 && 空文字でない && マスク文字列でない
         if (
           knownKeys.includes(key as (typeof knownKeys)[number]) &&
           typeof value === "string" &&
-          value !== ""
+          value !== "" &&
+          value !== "********"
         ) {
           (updated as Record<string, string>)[key] = value;
         }
