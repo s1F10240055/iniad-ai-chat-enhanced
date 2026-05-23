@@ -138,6 +138,11 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle("chat:slice", async (_event, id: string) => {
     return withErrorHandler(async () => {
+      // 応答生成中であれば、履歴不整合を防ぐためにキャンセルする
+      if (activeController) {
+        activeController.abort();
+        activeController = null;
+      }
       store.sliceHistoryUpTo(id);
     });
   });
