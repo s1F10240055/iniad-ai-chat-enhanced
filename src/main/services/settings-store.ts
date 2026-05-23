@@ -10,8 +10,6 @@ import { promises as fs } from "fs";
 import { join } from "path";
 import { AppSettings, DEFAULT_SETTINGS, PartialAppSettings } from "../../shared/types/settings";
 
-
-
 /** 設定ファイル名 */
 const SETTINGS_FILE = "settings.json";
 
@@ -88,7 +86,14 @@ export class SettingsStore {
       const updated = { ...this.cache! };
 
       // 既知のキーのみを許可（未知のキーやプロトタイプ汚染対策）
-      const knownKeys = ["apiKey", "baseURL", "model", "moocsUsername", "moocsPassword", "theme"] as const;
+      const knownKeys = [
+        "apiKey",
+        "baseURL",
+        "model",
+        "moocsUsername",
+        "moocsPassword",
+        "theme",
+      ] as const;
 
       for (const [key, value] of Object.entries(partialSettings)) {
         // バリデーション: 既知のキー && 文字列型 && 空文字でない
@@ -176,8 +181,6 @@ export class SettingsStore {
     const content = JSON.stringify(settings, null, 2);
     await fs.writeFile(this.settingsPath, content, "utf-8");
   }
-
-
 }
 
 /**

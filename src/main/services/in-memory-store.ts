@@ -30,7 +30,7 @@ export class InMemoryStore {
   }
 
   sliceHistoryUpTo(id: string): void {
-    const index = this.chatHistory.findIndex(m => m.id === id);
+    const index = this.chatHistory.findIndex((m) => m.id === id);
     if (index !== -1) {
       this.chatHistory = this.chatHistory.slice(0, index);
     }

@@ -23,24 +23,42 @@ const CodeBlock = ({ language, children, ...rest }: any) => {
 
   return (
     <div style={{ position: "relative" }} className="code-block-wrapper">
-      <button 
-        onClick={handleCopy} 
+      <button
+        onClick={handleCopy}
         className="copy-button code-copy-button"
         aria-label="Copy code"
         title="コードをコピー"
       >
         {copied ? (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10a37f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#10a37f"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
         ) : (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
         )}
       </button>
-      <SyntaxHighlighter
-        {...rest}
-        PreTag="div"
-        language={language}
-        style={vscDarkPlus}
-      >
+      <SyntaxHighlighter {...rest} PreTag="div" language={language} style={vscDarkPlus}>
         {String(children).replace(/\n$/, "")}
       </SyntaxHighlighter>
     </div>
@@ -109,25 +127,72 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ turn, onEdit }) =>
         <div className="message-sender-name">
           {isUser ? "あなた" : "AI アシスタント"}
           {isUser && onEdit && !isEditing && (
-            <button className="copy-button" onClick={() => setIsEditing(true)} aria-label="Edit message" title="メッセージを編集">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+            <button
+              className="copy-button"
+              onClick={() => setIsEditing(true)}
+              aria-label="Edit message"
+              title="メッセージを編集"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+              </svg>
             </button>
           )}
           {!isUser && (
-            <button className="copy-button" onClick={handleCopy} aria-label="Copy message" title="回答をコピー">
+            <button
+              className="copy-button"
+              onClick={handleCopy}
+              aria-label="Copy message"
+              title="回答をコピー"
+            >
               {copied ? (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10a37f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="#10a37f"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
               ) : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
               )}
             </button>
           )}
         </div>
-        <div className={`message-bubble ${isUser ? "user" : "assistant"} ${isEditing ? "editing" : ""}`}>
+        <div
+          className={`message-bubble ${isUser ? "user" : "assistant"} ${isEditing ? "editing" : ""}`}
+        >
           {isUser ? (
             isEditing ? (
               <div className="edit-container">
-                <textarea 
+                <textarea
                   className="chat-input-textarea edit-textarea"
                   value={editText}
                   onChange={(e) => setEditText(e.target.value)}
@@ -135,13 +200,20 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ turn, onEdit }) =>
                   autoFocus
                 />
                 <div className="edit-actions">
-                  <button className="chat-input-button" onClick={() => setIsEditing(false)}>キャンセル</button>
-                  <button className="chat-input-button send-button" onClick={() => {
-                    setIsEditing(false);
-                    if (editText.trim() && editText.trim() !== turn.content) {
-                      onEdit?.(turn.id, editText.trim());
-                    }
-                  }}>再送信</button>
+                  <button className="chat-input-button" onClick={() => setIsEditing(false)}>
+                    キャンセル
+                  </button>
+                  <button
+                    className="chat-input-button send-button"
+                    onClick={() => {
+                      setIsEditing(false);
+                      if (editText.trim() && editText.trim() !== turn.content) {
+                        onEdit?.(turn.id, editText.trim());
+                      }
+                    }}
+                  >
+                    再送信
+                  </button>
                 </div>
               </div>
             ) : (
