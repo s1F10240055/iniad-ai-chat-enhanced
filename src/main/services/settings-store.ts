@@ -88,7 +88,7 @@ export class SettingsStore {
       const updated = { ...this.cache! };
 
       // 既知のキーのみを許可（未知のキーやプロトタイプ汚染対策）
-      const knownKeys = ["apiKey", "baseURL", "model", "moocsUsername", "moocsPassword"] as const;
+      const knownKeys = ["apiKey", "baseURL", "model", "moocsUsername", "moocsPassword", "theme"] as const;
 
       for (const [key, value] of Object.entries(partialSettings)) {
         // バリデーション: 既知のキー && 文字列型 && 空文字でない
@@ -165,6 +165,7 @@ export class SettingsStore {
       model: parsed.model ?? DEFAULT_SETTINGS.model,
       moocsUsername: parsed.moocsUsername ?? DEFAULT_SETTINGS.moocsUsername,
       moocsPassword: parsed.moocsPassword ?? DEFAULT_SETTINGS.moocsPassword,
+      theme: parsed.theme ?? DEFAULT_SETTINGS.theme,
     };
   }
 

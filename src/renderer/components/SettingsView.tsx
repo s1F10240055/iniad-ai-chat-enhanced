@@ -184,6 +184,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
       // 編集されたフィールドのみ送信
       const partial: Partial<AppSettings> = {};
       for (const field of editedFields) {
+        // @ts-expect-error 動的なキー代入のため型エラーを無視
         partial[field] = settings[field];
       }
 

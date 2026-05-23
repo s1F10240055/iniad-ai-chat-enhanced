@@ -15,6 +15,8 @@ export interface AppSettings {
   moocsUsername: string;
   /** INIAD MOOCs パスワード（設定画面ではマスク表示） */
   moocsPassword: string;
+  /** UIテーマ */
+  theme: "light" | "dark";
 }
 
 /** AppSettings のデフォルト値 */
@@ -24,6 +26,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   model: "gpt-5.4-nano",
   moocsUsername: "",
   moocsPassword: "",
+  theme: "dark",
 };
 
 /** MCP 接続状態 */

@@ -16,6 +16,7 @@ const App: React.FC = () => {
   const [mcpConnectionStatus, setMcpConnectionStatus] = useState<McpStatus>("disconnected");
   const [modelName, setModelName] = useState("GPT-5.4-nano");
   const [currentView, setCurrentView] = useState<ViewType>("chat");
+  const [theme, setTheme] = useState<"light" | "dark">("dark");
 
   useEffect(() => {
     const cleanup = window.electronAPI?.onMcpStatusChange?.((status) => {
@@ -33,10 +34,33 @@ const App: React.FC = () => {
         setModelName("GPT-5.4-nano");
       });
 
+    window.electronAPI
+      ?.getSettings?.()
+      .then((settings) => {
+        if (settings.theme) {
+          setTheme(settings.theme as "light" | "dark");
+        }
+      })
+      .catch(console.error);
+
     return () => {
       cleanup?.();
     };
   }, []);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
+
+  const toggleTheme = async () => {
+    const newTheme = theme === "light" ? "dark" : "light";
+    setTheme(newTheme);
+    try {
+      await window.electronAPI.saveSettings({ theme: newTheme });
+    } catch (e) {
+      console.error("Failed to save theme", e);
+    }
+  };
 
   /** ビュー切替 */
   const switchView = (target: ViewType) => {
@@ -100,6 +124,24 @@ const App: React.FC = () => {
     setIsLoading(false);
   };
 
+  const handleEdit = async (id: string, newText: string) => {
+    const index = messages.findIndex((m) => m.id === id);
+    if (index === -1) return;
+
+    // ローカルのステートをスライス
+    setMessages((prev) => prev.slice(0, index));
+
+    // バックエンドの履歴をスライス
+    try {
+      await window.electronAPI.sliceChat(id);
+    } catch (e) {
+      console.error("Failed to slice remote chat", e);
+    }
+
+    // 新しいメッセージとして再送信
+    handleSend(newText);
+  };
+
   const isChat = currentView === "chat";
 
   return (
@@ -108,11 +150,24 @@ const App: React.FC = () => {
         {isChat ? (
           <>
             <h1>INIAD AI Chat Enhanced</h1>
-            <button
-              className="settings-button"
-              onClick={() => switchView("settings")}
-              aria-label="設定を開く"
-            >
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                className="settings-button"
+                onClick={toggleTheme}
+                aria-label="テーマ切替"
+                title="テーマ切替"
+              >
+                {theme === "light" ? (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+                )}
+              </button>
+              <button
+                className="settings-button"
+                onClick={() => switchView("settings")}
+                aria-label="設定を開く"
+              >
               <svg
                 width="16"
                 height="16"
@@ -128,6 +183,7 @@ const App: React.FC = () => {
               </svg>{" "}
               設定
             </button>
+            </div>
           </>
         ) : (
           <>
@@ -159,7 +215,7 @@ const App: React.FC = () => {
       <div className="views-container">
         <div className={`view-layer ${isChat ? "view-active" : "view-hidden"}`}>
           <main className="app-main">
-            <ChatView messages={messages} isLoading={isLoading} onStop={handleStop} />
+            <ChatView messages={messages} isLoading={isLoading} onStop={handleStop} onEdit={handleEdit} />
           </main>
           <ChatInput onSend={handleSend} disabled={isLoading} />
         </div>
