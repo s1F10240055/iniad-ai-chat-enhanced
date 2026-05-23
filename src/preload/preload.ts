@@ -31,6 +31,9 @@ const api = {
   /** 会話履歴をクリアする */
   clearHistory: (): Promise<void> => ipcRenderer.invoke("chat:clear"),
 
+  /** 指定したID以降の会話履歴を削除する */
+  sliceChat: (id: string): Promise<void> => ipcRenderer.invoke("chat:slice", id),
+
   // ── ステータス ──
   /** アプリケーションの現在の状態を取得する */
   getStatus: (): Promise<AppStatus> => ipcRenderer.invoke("app:status"),

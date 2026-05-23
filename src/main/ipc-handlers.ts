@@ -136,6 +136,12 @@ export function registerIpcHandlers(): void {
     });
   });
 
+  ipcMain.handle("chat:slice", async (_event, id: string) => {
+    return withErrorHandler(async () => {
+      store.sliceHistoryUpTo(id);
+    });
+  });
+
   // ── ステータス ──
 
   ipcMain.handle("app:status", async () => {

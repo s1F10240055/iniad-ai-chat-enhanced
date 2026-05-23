@@ -23,6 +23,7 @@ export interface ElectronAPI {
   // ── 会話履歴 ──
   getChatHistory: () => Promise<ChatTurn[]>;
   clearHistory: () => Promise<void>;
+  sliceChat: (id: string) => Promise<void>;
 
   // ── ステータス ──
   getStatus: () => Promise<AppStatus>;

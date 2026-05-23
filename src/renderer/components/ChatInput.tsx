@@ -7,6 +7,8 @@ interface ChatInputProps {
 
 export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
   const [text, setText] = useState("");
+  const [history, setHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -19,7 +21,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
   const handleSubmit = (e?: React.SyntheticEvent) => {
     e?.preventDefault();
     if (text.trim() && !disabled) {
-      onSend(text.trim());
+      const sentText = text.trim();
+      onSend(sentText);
+      setHistory(prev => [sentText, ...prev]);
+      setHistoryIndex(-1);
       setText("");
       if (textareaRef.current) {
         textareaRef.current.style.height = "auto";
@@ -29,9 +34,41 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.nativeEvent && e.nativeEvent.isComposing) return;
+    
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSubmit(e);
+      return;
+    }
+
+    if (e.key === "ArrowUp" && text === "") {
+      e.preventDefault();
+      if (history.length > 0) {
+        setText(history[0]);
+        setHistoryIndex(0);
+      }
+      return;
+    }
+
+    if (e.key === "ArrowUp" && historyIndex >= 0 && historyIndex < history.length - 1) {
+      e.preventDefault();
+      const nextIndex = historyIndex + 1;
+      setText(history[nextIndex]);
+      setHistoryIndex(nextIndex);
+      return;
+    }
+
+    if (e.key === "ArrowDown" && historyIndex >= 0) {
+      e.preventDefault();
+      if (historyIndex === 0) {
+        setText("");
+        setHistoryIndex(-1);
+      } else {
+        const prevIndex = historyIndex - 1;
+        setText(history[prevIndex]);
+        setHistoryIndex(prevIndex);
+      }
+      return;
     }
   };
 
