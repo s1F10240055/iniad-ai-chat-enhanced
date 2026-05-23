@@ -182,11 +182,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
 
     try {
       // 編集されたフィールドのみ送信
-      const partial: Partial<AppSettings> = {};
-      for (const field of editedFields) {
-        // @ts-expect-error 動的なキー代入のため型エラーを無視
-        partial[field] = settings[field];
-      }
+      const partial = Object.fromEntries(
+        Array.from(editedFields, (field) => [field, settings[field]] as const)
+      ) as Partial<AppSettings>;
 
       if (window.electronAPI?.saveSettings) {
         await window.electronAPI.saveSettings(partial);
