@@ -198,7 +198,7 @@ body {
 }
 
 .message-bubble-wrapper.user .message-avatar {
-  background-color: #313244;
+  background-color: var(--user-bubble);
 }
 
 .message-bubble-wrapper.assistant .message-avatar {
@@ -217,7 +217,7 @@ body {
   margin-bottom: 0.25rem;
   font-weight: 600;
   display: flex;
-  align-items: center;
+align-items: center;
 }
 
 .message-bubble-wrapper.user .message-sender-name {
