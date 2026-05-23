@@ -129,7 +129,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ turn, onEdit }) =>
           {isUser && onEdit && !isEditing && (
             <button
               className="copy-button"
-              onClick={() => setIsEditing(true)}
+              onClick={() => {
+                setIsEditing(true);
+                setEditText(turn.content);
+              }}
               aria-label="Edit message"
               title="メッセージを編集"
             >
