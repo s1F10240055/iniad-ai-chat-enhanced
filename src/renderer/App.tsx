@@ -67,16 +67,29 @@ const App: React.FC = () => {
       setMessages((prev) => [...prev, newAiMsg]);
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
-      const errorMsg: ChatTurn = {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: `エラーが発生しました: ${errMsg}`,
-        timestamp: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, errorMsg]);
+      const isAbort = errMsg.includes("abort") || errMsg.includes("cancel") || errMsg.includes("canceled");
+      
+      if (!isAbort) {
+        const errorMsg: ChatTurn = {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: `エラーが発生しました: ${errMsg}`,
+          timestamp: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, errorMsg]);
+      }
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleStop = async () => {
+    try {
+      await window.electronAPI.cancelChat();
+    } catch (e) {
+      console.error("Failed to cancel chat:", e);
+    }
+    setIsLoading(false);
   };
 
   const isChat = currentView === "chat";
@@ -138,9 +151,9 @@ const App: React.FC = () => {
       <div className="views-container">
         <div className={`view-layer ${isChat ? "view-active" : "view-hidden"}`}>
           <main className="app-main">
-            <ChatView messages={messages} />
+            <ChatView messages={messages} isLoading={isLoading} />
           </main>
-          <ChatInput onSend={handleSend} disabled={isLoading} />
+          <ChatInput onSend={handleSend} onStop={handleStop} disabled={isLoading} />
         </div>
 
         <div className={`view-layer ${!isChat ? "view-active" : "view-hidden"}`}>

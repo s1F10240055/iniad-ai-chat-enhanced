@@ -2,10 +2,11 @@ import React, { useState, useRef, useEffect } from "react";
 
 interface ChatInputProps {
   onSend: (text: string) => void;
+  onStop?: () => void;
   disabled?: boolean;
 }
 
-export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
+export const ChatInput: React.FC<ChatInputProps> = ({ onSend, onStop, disabled }) => {
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -49,9 +50,17 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
           disabled={disabled}
           rows={1}
         />
-        <button type="submit" className="chat-input-button" disabled={disabled || !text.trim()}>
-          送信
-        </button>
+        {disabled && onStop ? (
+          <button type="button" className="chat-input-button stop-button" onClick={onStop} aria-label="Stop generation" title="生成を停止">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            </svg>
+          </button>
+        ) : (
+          <button type="submit" className="chat-input-button" disabled={disabled || !text.trim()}>
+            送信
+          </button>
+        )}
       </form>
     </div>
   );

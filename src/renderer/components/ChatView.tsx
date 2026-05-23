@@ -1,18 +1,20 @@
 import React, { useRef, useEffect } from "react";
 import { ChatTurn } from "../../shared/types/chat";
 import { MessageBubble } from "./MessageBubble";
+import { TypingIndicator } from "./TypingIndicator";
 
 interface ChatViewProps {
   messages: ChatTurn[];
+  isLoading?: boolean;
 }
 
-export const ChatView: React.FC<ChatViewProps> = ({ messages }) => {
+export const ChatView: React.FC<ChatViewProps> = ({ messages, isLoading }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // スクロールを一番下へ移動
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, isLoading]);
 
   return (
     <div className="chat-view-container">
@@ -23,6 +25,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ messages }) => {
       ) : (
         messages.map((msg) => <MessageBubble key={msg.id} turn={msg} />)
       )}
+      {isLoading && <TypingIndicator />}
       <div ref={bottomRef} />
     </div>
   );
