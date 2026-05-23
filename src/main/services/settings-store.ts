@@ -10,8 +10,7 @@ import { promises as fs } from "fs";
 import { join } from "path";
 import { AppSettings, DEFAULT_SETTINGS, PartialAppSettings } from "../../shared/types/settings";
 
-/** マスク文字列 */
-const MASKED_VALUE = "••••••••";
+
 
 /** 設定ファイル名 */
 const SETTINGS_FILE = "settings.json";
@@ -57,14 +56,11 @@ export class SettingsStore {
     }
   }
 
-  /**
-   * 設定を取得する（APIキー・パスワードはマスク済み）
-   */
   getSettings(): AppSettings {
     if (!this.cache) {
       throw new Error("SettingsStore not initialized. Call init() first.");
     }
-    return this.maskSensitiveFields(this.cache);
+    return { ...this.cache };
   }
 
   /**
@@ -180,16 +176,7 @@ export class SettingsStore {
     await fs.writeFile(this.settingsPath, content, "utf-8");
   }
 
-  /**
-   * 機密フィールドをマスクする
-   */
-  private maskSensitiveFields(settings: AppSettings): AppSettings {
-    return {
-      ...settings,
-      apiKey: settings.apiKey ? MASKED_VALUE : "",
-      moocsPassword: settings.moocsPassword ? MASKED_VALUE : "",
-    };
-  }
+
 }
 
 /**
