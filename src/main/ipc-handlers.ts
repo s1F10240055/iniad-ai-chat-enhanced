@@ -118,33 +118,25 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle("chat:cancel", async () => {
-    return withErrorHandler(async () => {
-      activeController?.abort();
-      activeController = null;
-    });
+    activeController?.abort();
+    activeController = null;
   });
 
   ipcMain.handle("chat:list", async () => {
-    return withErrorHandler(async () => {
-      return store.getHistory();
-    });
+    return store.getHistory();
   });
 
   ipcMain.handle("chat:clear", async () => {
-    return withErrorHandler(async () => {
-      store.clearHistory();
-    });
+    store.clearHistory();
   });
 
   ipcMain.handle("chat:slice", async (_event, id: string) => {
-    return withErrorHandler(async () => {
-      // 応答生成中であれば、履歴不整合を防ぐためにキャンセルする
-      if (activeController) {
-        activeController.abort();
-        activeController = null;
-      }
-      store.sliceHistoryUpTo(id);
-    });
+    // 応答生成中であれば、履歴不整合を防ぐためにキャンセルする
+    if (activeController) {
+      activeController.abort();
+      activeController = null;
+    }
+    store.sliceHistoryUpTo(id);
   });
 
   // ── ステータス ──
