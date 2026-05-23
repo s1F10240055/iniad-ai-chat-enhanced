@@ -53,7 +53,7 @@
   --hover-bg: rgba(0, 0, 0, 0.08);
   --active-bg: rgba(0, 0, 0, 0.15);
   --message-hover-bg: rgba(0, 0, 0, 0.06);
-  --message-assistant-bg: rgba(0, 0, 0, 0.03);
+  --message-assistant-bg: rgba(30, 102, 245, 0.04);
   --border-highlight: rgba(0, 0, 0, 0.1);
   --copy-button-hover-bg: rgba(0, 0, 0, 0.15);
   --code-header-bg: rgba(0, 0, 0, 0.08);
