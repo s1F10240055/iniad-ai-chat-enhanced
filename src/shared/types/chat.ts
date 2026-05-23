@@ -7,8 +7,8 @@
 export interface ChatTurn {
   /** 一意なメッセージID */
   id: string;
-  /** "user" | "assistant" */
-  role: "user" | "assistant";
+  /** "user" | "assistant" | "system" */
+  role: "user" | "assistant" | "system";
   /** メッセージ本文 */
   content: string;
   /** AI回答の場合、参照元の引用情報 */

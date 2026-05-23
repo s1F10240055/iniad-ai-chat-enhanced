@@ -69,7 +69,15 @@ const App: React.FC = () => {
       const errMsg = error instanceof Error ? error.message : String(error);
       const isAbort = errMsg.includes("abort") || errMsg.includes("cancel") || errMsg.includes("canceled");
       
-      if (!isAbort) {
+      if (isAbort) {
+        const cancelMsg: ChatTurn = {
+          id: crypto.randomUUID(),
+          role: "system",
+          content: "生成がキャンセルされました。",
+          timestamp: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, cancelMsg]);
+      } else {
         const errorMsg: ChatTurn = {
           id: crypto.randomUUID(),
           role: "assistant",

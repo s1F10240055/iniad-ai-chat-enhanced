@@ -11,7 +11,16 @@ interface MessageBubbleProps {
 
 export const MessageBubble: React.FC<MessageBubbleProps> = ({ turn }) => {
   const isUser = turn.role === "user";
+  const isSystem = turn.role === "system";
   const [copied, setCopied] = useState(false);
+
+  if (isSystem) {
+    return (
+      <div className="message-system">
+        <span>{turn.content}</span>
+      </div>
+    );
+  }
 
   const handleCopy = () => {
     navigator.clipboard.writeText(turn.content).then(() => {
