@@ -287,7 +287,7 @@ export class McpClient {
   private tokenizeQuery(query: string): string[] {
     return query
       .toLowerCase()
-      .split(/[のはがをにでともへからまでについてまたやでもの、。！？・\s\-_.：:；;（）()「」『』【】\[\]]+/)
+      .split(/[のはがをにでともへからまでについてまたやでもの、。！？・\s\-_.：:；;（）()「」『』【】[\]]+/)
       .filter((t) => t.length >= 2);
   }
 
@@ -336,8 +336,16 @@ export class McpClient {
   // ── クリーンアップ ──────────────────────────────
 
   private async cleanupResources(): Promise<void> {
-    try { await this.client?.close(); } catch {}
-    try { this.transport?.close?.(); } catch {}
+    try {
+      await this.client?.close();
+    } catch {
+      // クリーンアップエラーは無視
+    }
+    try {
+      this.transport?.close?.();
+    } catch {
+      // クリーンアップエラーは無視
+    }
     this.client = null;
     this.transport = null;
   }

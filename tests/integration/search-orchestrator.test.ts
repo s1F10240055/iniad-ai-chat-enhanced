@@ -2,23 +2,25 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { SearchOrchestrator } from "../../src/main/services/search-orchestrator";
 import type { SearchResult } from "../../src/shared/types/search";
 
-function createMockMcpClient(results: SearchResult[] = [], shouldFail = false) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function createMockMcpClient(results: SearchResult[] = [], shouldFail = false): any {
   return {
     searchMoocs: vi.fn().mockImplementation(async (_query: string) => {
       if (shouldFail) throw new Error("MCP connection failed");
       return { success: true, results };
     }),
     getStatus: vi.fn().mockReturnValue("connected"),
-  } as any;
+  };
 }
 
-function createMockWebClient(results: SearchResult[] = [], shouldFail = false) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function createMockWebClient(results: SearchResult[] = [], shouldFail = false): any {
   return {
     search: vi.fn().mockImplementation(async (_query: string) => {
       if (shouldFail) throw new Error("Web search failed");
       return { success: true, results };
     }),
-  } as any;
+  };
 }
 
 describe("SearchOrchestrator", () => {

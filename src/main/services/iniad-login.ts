@@ -12,7 +12,6 @@ export function loginViaBrowser(
 ): Promise<{ success: boolean; error?: string }> {
   return new Promise((resolve) => {
     let resolved = false;
-    let hasSeenLoginPage = false;
 
     const finish = (result: { success: boolean; error?: string }) => {
       if (resolved) return;
@@ -20,7 +19,9 @@ export function loginViaBrowser(
       clearTimeout(timeout);
       try {
         loginWindow.close();
-      } catch {}
+      } catch {
+        // ウィンドウはすでに閉じている可能性がある
+      }
       resolve(result);
     };
 
@@ -48,7 +49,6 @@ export function loginViaBrowser(
       const url = loginWindow.webContents.getURL();
 
       if (url.includes("idmanager") || url.includes("login")) {
-        hasSeenLoginPage = true;
         try {
           await loginWindow.webContents.executeJavaScript(`
             const u = document.querySelector('input#username, input[name="username"], input[ref=s1e16]');
@@ -57,7 +57,9 @@ export function loginViaBrowser(
             if (p) { p.value = ${JSON.stringify(password)}; p.dispatchEvent(new Event('input', {bubbles:true})); }
           `);
           loginWindow.setTitle("INIAD MOOCs ログイン - ログインボタンを押してください");
-        } catch {}
+        } catch {
+          // フォーム入力の注入に失敗した場合はユーザーが手動で入力可能
+        }
         return;
       }
 

@@ -42,17 +42,6 @@ function broadcastMcpStatus(status: McpStatus): void {
   }
 }
 
-async function connectMcp(username: string, password: string): Promise<void> {
-  broadcastMcpStatus("connecting");
-  try {
-    await mcpClient.connect(username, password);
-    broadcastMcpStatus("connected");
-  } catch (error) {
-    broadcastMcpStatus("disconnected");
-    throw error;
-  }
-}
-
 // ── Error handling wrapper ──────────────────────────
 
 async function withErrorHandler<T>(
