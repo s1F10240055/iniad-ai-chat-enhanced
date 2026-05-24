@@ -154,10 +154,16 @@ export class SearchOrchestrator {
       { role: "user", content: context },
     ];
 
-    // 直近の会話履歴を追加（最新10ターン）
+    // 直近の会話履歴を追加（最新10ターン、ただし末尾の重複userは除外）
     if (history && history.length > 0) {
       const recentHistory = history.slice(-10);
-      for (const turn of recentHistory) {
+      const trimmed =
+        recentHistory.length > 0 &&
+        recentHistory[recentHistory.length - 1].role === "user" &&
+        recentHistory[recentHistory.length - 1].content === userText
+          ? recentHistory.slice(0, -1)
+          : recentHistory;
+      for (const turn of trimmed) {
         messages.push({ role: turn.role, content: turn.content });
       }
     }
