@@ -17,7 +17,7 @@
     "type-check": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:integration": "vitest run --config vitest.config.ts tests/integration"
+    "test:integration": "vitest run --config vitest.config.mts tests/integration"
   },
   "keywords": [],
   "author": {
