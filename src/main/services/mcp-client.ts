@@ -183,8 +183,8 @@ export class McpClient {
       const courseTitles = courses.map((c) => c.title).filter(Boolean);
       console.log(
         `[McpClient] searchMoocs: query="${trimmedQuery}", tokens=${JSON.stringify(tokens)}, ` +
-        `courses=${courses.length}(${JSON.stringify(courseTitles.slice(0, 5))}), ` +
-        `lectures=${lectures.length}, slides=${slides.length}, matched=${results.length}`
+          `courses=${courses.length}(${JSON.stringify(courseTitles.slice(0, 5))}), ` +
+          `lectures=${lectures.length}, slides=${slides.length}, matched=${results.length}`
       );
 
       return {
@@ -287,7 +287,9 @@ export class McpClient {
   private tokenizeQuery(query: string): string[] {
     return query
       .toLowerCase()
-      .split(/[のはがをにでともへからまでについてまたやでもの、。！？・\s\-_.：:；;（）()「」『』【】[\]]+/)
+      .split(
+        /[のはがをにでともへからまでについてまたやでもの、。！？・\s\-_.：:；;（）()「」『』【】[\]]+/
+      )
       .filter((t) => t.length >= 2);
   }
 

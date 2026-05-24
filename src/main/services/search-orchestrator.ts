@@ -8,7 +8,12 @@
 
 import type { SearchResult } from "../../shared/types/search";
 import type { AppSettings } from "../../shared/types/settings";
-import type { ChatResponse, ChatCompletionResponse, ChatTurn, Citation } from "../../shared/types/chat";
+import type {
+  ChatResponse,
+  ChatCompletionResponse,
+  ChatTurn,
+  Citation,
+} from "../../shared/types/chat";
 import type { McpClient } from "./mcp-client";
 import type { WebSearchClient } from "./web-search-client";
 
