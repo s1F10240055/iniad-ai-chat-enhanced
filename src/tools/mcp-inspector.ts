@@ -109,35 +109,39 @@ async function runREPL() {
       return;
     }
 
-    const [cmd, ...args] = input.split(/\s+/);
+    try {
+      const [cmd, ...args] = input.split(/\s+/);
 
-    switch (cmd) {
-      case "connect":
-        await cmdConnect();
-        break;
-      case "disconnect":
-        await cmdDisconnect();
-        break;
-      case "status":
-        await cmdStatus();
-        break;
-      case "search":
-        await cmdSearch(args.join(" "));
-        break;
-      case "cache":
-        await cmdCache();
-        break;
-      case "help":
-        cmdHelp();
-        break;
-      case "quit":
-      case "exit":
-        console.log("Bye!");
-        await client.disconnect().catch(() => {});
-        rl.close();
-        return;
-      default:
-        logError(`Unknown command: ${cmd}. Type 'help' for available commands.`);
+      switch (cmd) {
+        case "connect":
+          await cmdConnect();
+          break;
+        case "disconnect":
+          await cmdDisconnect();
+          break;
+        case "status":
+          await cmdStatus();
+          break;
+        case "search":
+          await cmdSearch(args.join(" "));
+          break;
+        case "cache":
+          await cmdCache();
+          break;
+        case "help":
+          cmdHelp();
+          break;
+        case "quit":
+        case "exit":
+          console.log("Bye!");
+          await client.disconnect().catch(() => {});
+          rl.close();
+          return;
+        default:
+          logError(`Unknown command: ${cmd}. Type 'help' for available commands.`);
+      }
+    } catch (error) {
+      logError(error instanceof Error ? error.message : String(error));
     }
 
     rl.prompt();
