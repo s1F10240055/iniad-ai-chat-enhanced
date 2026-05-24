@@ -14,8 +14,15 @@ import type {
   ChatTurn,
   Citation,
 } from "../../shared/types/chat";
-import type { McpClient } from "./mcp-client";
-import type { WebSearchClient } from "./web-search-client";
+export interface IMoocsSearchProvider {
+  searchMoocs(
+    query: string
+  ): Promise<{ success: boolean; results: SearchResult[]; error?: string; debug?: string }>;
+}
+
+export interface IWebSearchProvider {
+  search(query: string): Promise<{ success: boolean; results: SearchResult[]; error?: string }>;
+}
 
 const RAG_SYSTEM_PROMPT = `あなたは INIAD MOOCs の学習アシスタントです。
 以下の「検索状況」と「検索結果」を参考にしてユーザーの質問に答えてください。
@@ -31,8 +38,8 @@ const RAG_SYSTEM_PROMPT = `あなたは INIAD MOOCs の学習アシスタント�
 
 export class SearchOrchestrator {
   constructor(
-    private mcpClient: McpClient,
-    private webClient: WebSearchClient
+    private mcpClient: IMoocsSearchProvider,
+    private webClient: IWebSearchProvider
   ) {}
 
   /**

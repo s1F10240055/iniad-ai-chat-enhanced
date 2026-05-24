@@ -1,20 +1,27 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { SearchOrchestrator } from "../../src/main/services/search-orchestrator";
+import {
+  SearchOrchestrator,
+  type IMoocsSearchProvider,
+  type IWebSearchProvider,
+} from "../../src/main/services/search-orchestrator";
 import type { SearchResult } from "../../src/shared/types/search";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function createMockMcpClient(results: SearchResult[] = [], shouldFail = false): any {
+function createMockMcpClient(
+  results: SearchResult[] = [],
+  shouldFail = false
+): IMoocsSearchProvider & { searchMoocs: ReturnType<typeof vi.fn> } {
   return {
     searchMoocs: vi.fn().mockImplementation(async (_query: string) => {
       if (shouldFail) throw new Error("MCP connection failed");
       return { success: true, results };
     }),
-    getStatus: vi.fn().mockReturnValue("connected"),
   };
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function createMockWebClient(results: SearchResult[] = [], shouldFail = false): any {
+function createMockWebClient(
+  results: SearchResult[] = [],
+  shouldFail = false
+): IWebSearchProvider & { search: ReturnType<typeof vi.fn> } {
   return {
     search: vi.fn().mockImplementation(async (_query: string) => {
       if (shouldFail) throw new Error("Web search failed");
