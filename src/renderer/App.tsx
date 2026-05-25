@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { ChatView } from "./components/ChatView";
+import { ChatInput } from "./components/ChatInput";
+import { StatusBar } from "./components/StatusBar";
 import { SettingsView } from "./components/SettingsView";
 import { ChatTurn } from "../shared/types/chat";
 import type { McpStatus } from "../shared/types/settings";
