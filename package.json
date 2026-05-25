@@ -14,7 +14,10 @@
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
     "format": "prettier --check \"src/**/*.{ts,tsx}\"",
     "format:fix": "prettier --write \"src/**/*.{ts,tsx}\"",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.config.mts tests/integration"
   },
   "keywords": [],
   "author": {
@@ -57,6 +60,7 @@
     "prettier": "^3.5.3",
     "style-loader": "^4.0.0",
     "ts-loader": "^9.5.7",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
   }
 }

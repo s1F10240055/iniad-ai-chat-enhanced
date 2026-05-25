@@ -138,7 +138,7 @@ const App: React.FC = () => {
       // バックエンドの履歴をスライス
       await window.electronAPI.sliceChat(id);
       // 成功した場合のみ、新しいメッセージとして再送信
-      handleSend(newText);
+      await handleSend(newText);
     } catch (e) {
       console.error("Failed to slice remote chat:", e);
       // 失敗時はローカルの状態を元に戻し、ユーザーに通知する
