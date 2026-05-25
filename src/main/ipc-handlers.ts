@@ -19,8 +19,10 @@ import { ipcMain, BrowserWindow } from "electron";
 import { toSerializableError } from "../shared/types/errors";
 import { InMemoryStore } from "./services/in-memory-store";
 import { McpClient } from "./services/mcp-client";
+import { MoocsSearch } from "./services/moocs-search";
 import { WebSearchClient } from "./services/web-search-client";
 import { SearchOrchestrator } from "./services/search-orchestrator";
+import { loginViaBrowser } from "./services/iniad-login";
 import { settingsStore } from "./services/settings-store";
 import type { ChatTurn } from "../shared/types/chat";
 import type { McpStatus } from "../shared/types/settings";
@@ -28,8 +30,9 @@ import type { ChatResponse } from "../shared/types/chat";
 
 const store = new InMemoryStore();
 const mcpClient = new McpClient();
+const moocsSearch = new MoocsSearch(mcpClient);
 const webClient = new WebSearchClient();
-const orchestrator = new SearchOrchestrator(mcpClient, webClient);
+const orchestrator = new SearchOrchestrator(moocsSearch, webClient);
 let activeController: AbortController | null = null;
 
 // ── Helper: broadcast MCP status to all windows ────
@@ -38,17 +41,6 @@ function broadcastMcpStatus(status: McpStatus): void {
   store.setMcpStatus(status);
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send("mcp:status", status);
-  }
-}
-
-async function connectMcp(username: string, password: string): Promise<void> {
-  broadcastMcpStatus("connecting");
-  try {
-    await mcpClient.connect(username, password);
-    broadcastMcpStatus("connected");
-  } catch (error) {
-    broadcastMcpStatus("disconnected");
-    throw error;
   }
 }
 
@@ -96,7 +88,8 @@ export function registerIpcHandlers(): void {
       const response: ChatResponse = await orchestrator.chatWithRAG(
         userText,
         settings,
-        activeController.signal
+        activeController.signal,
+        store.getHistory()
       );
 
       const assistantMessage: ChatTurn = {
@@ -153,18 +146,6 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle("settings:set", async (_event, partial: Record<string, string>) => {
     await settingsStore.updateSettings(partial);
-
-    // MOOCs 認証情報が更新された場合、MCP 接続を試行
-    if (partial.moocsUsername || partial.moocsPassword) {
-      const raw = settingsStore.getRawSettings();
-      if (raw.moocsUsername && raw.moocsPassword) {
-        try {
-          await connectMcp(raw.moocsUsername, raw.moocsPassword);
-        } catch (error) {
-          console.warn("[IPC] MCP connect after settings save failed:", error);
-        }
-      }
-    }
   });
 
   ipcMain.handle("settings:test-api", async () => {
@@ -180,10 +161,19 @@ export function registerIpcHandlers(): void {
         signal: AbortSignal.timeout(10_000),
       });
 
-      if (response.ok) {
-        return { success: true };
+      if (!response.ok) {
+        return { success: false, error: `API returned ${response.status}` };
       }
-      return { success: false, error: `API returned ${response.status}` };
+
+      const data = (await response.json()) as { data?: unknown[]; error?: { message?: string } };
+      if (data.error) {
+        return { success: false, error: data.error.message || "認証エラー" };
+      }
+      if (!data.data || !Array.isArray(data.data)) {
+        return { success: false, error: "APIレスポンスが不正です" };
+      }
+
+      return { success: true };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return { success: false, error: message };
@@ -196,27 +186,21 @@ export function registerIpcHandlers(): void {
       return { success: false, error: "MOOCs 認証情報が設定されていません" };
     }
 
-    try {
-      await connectMcp(settings.moocsUsername, settings.moocsPassword);
-      return { success: true };
-    } catch (error) {
-      const err = toSerializableError(error);
-      return { success: false, error: err.message };
-    }
-  });
+    moocsSearch.reset();
 
-  // ── 起動時の自動接続 ──
-  if (settingsStore.hasMoocsCredentials()) {
-    const raw = settingsStore.getRawSettings();
-    connectMcp(raw.moocsUsername, raw.moocsPassword).catch((error) => {
-      console.warn("[IPC] Auto MCP connect failed:", error);
-    });
-  }
+    return loginViaBrowser(
+      settings.moocsUsername,
+      settings.moocsPassword,
+      mcpClient,
+      broadcastMcpStatus
+    );
+  });
 }
 
 export const testExports = {
   store,
   mcpClient,
+  moocsSearch,
   webClient,
   orchestrator,
 };
