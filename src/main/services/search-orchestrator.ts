@@ -20,6 +20,11 @@ export interface IMoocsSearchProvider {
   ): Promise<{ success: boolean; results: SearchResult[]; error?: string; debug?: string }>;
 }
 
+const MAX_SNIPPET_LENGTH = 200;
+const MAX_CONTEXT_CHARS = 2000;
+const MAX_HISTORY_CHARS = 3000;
+const MAX_HISTORY_TURNS = 10;
+
 export interface IWebSearchProvider {
   search(query: string): Promise<{ success: boolean; results: SearchResult[]; error?: string }>;
 }
@@ -161,16 +166,26 @@ export class SearchOrchestrator {
       { role: "user", content: context },
     ];
 
-    // 直近の会話履歴を追加（最新10ターン、ただし末尾の重複userは除外）
+    // 直近の会話履歴を追加（文字数上限内で最新ターンから追加）
     if (history && history.length > 0) {
-      const recentHistory = history.slice(-10);
-      const trimmed =
+      const recentHistory = history.slice(-MAX_HISTORY_TURNS);
+      const deduped =
         recentHistory.length > 0 &&
         recentHistory[recentHistory.length - 1].role === "user" &&
         recentHistory[recentHistory.length - 1].content === userText
           ? recentHistory.slice(0, -1)
           : recentHistory;
-      for (const turn of trimmed) {
+
+      let historyChars = 0;
+      const selected: ChatTurn[] = [];
+      for (let i = deduped.length - 1; i >= 0; i--) {
+        const turn = deduped[i];
+        historyChars += turn.content.length;
+        if (historyChars > MAX_HISTORY_CHARS) break;
+        selected.unshift(turn);
+      }
+
+      for (const turn of selected) {
         messages.push({ role: turn.role, content: turn.content });
       }
     }
@@ -224,15 +239,20 @@ export class SearchOrchestrator {
       for (let i = 0; i < results.length; i++) {
         const r = results[i];
         const sourceLabel = r.source === "moocs" ? "MOOCs" : "Web";
+        const snippet =
+          r.snippet.length > MAX_SNIPPET_LENGTH
+            ? r.snippet.slice(0, MAX_SNIPPET_LENGTH) + "..."
+            : r.snippet;
         lines.push(
           `\n[${i + 1}] (${sourceLabel}) ${r.title}`,
           `    URL: ${r.url}`,
-          `    ${r.snippet}`
+          `    ${snippet}`
         );
       }
     }
 
-    return lines.join("\n");
+    const full = lines.join("\n");
+    return full.length > MAX_CONTEXT_CHARS ? full.slice(0, MAX_CONTEXT_CHARS) + "\n..." : full;
   }
 
   /**
