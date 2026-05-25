@@ -1,4 +1,5 @@
-:root {
+:root,
+:root.theme-dark {
   --bg-main: #1e1e2e;
   --bg-panel: #27273a;
   --text-main: #cdd6f4;
@@ -8,6 +9,20 @@
   --user-bubble: #313244;
   --ai-bubble: #45475a;
   --border-color: #45475a;
+  --sidebar-bg: #181825;
+}
+
+:root.theme-light {
+  --bg-main: #eff1f5;
+  --bg-panel: #e6e9ef;
+  --text-main: #4c4f69;
+  --text-muted: #6c6f85;
+  --primary: #1e66f5;
+  --primary-hover: #7287fd;
+  --user-bubble: #ccd0da;
+  --ai-bubble: #dce0e8;
+  --border-color: #bcc0cc;
+  --sidebar-bg: #dce0e8;
 }
 
 * {
@@ -26,8 +41,100 @@ body {
 
 .app {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   height: 100vh;
+  width: 100vw;
+}
+
+.sidebar {
+  width: 260px;
+  background-color: var(--sidebar-bg);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  transition: width 0.3s ease;
+}
+
+.sidebar-header {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.sidebar-header h1 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.sidebar-nav {
+  flex: 1;
+  padding: 1rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.nav-item {
+  padding: 0.75rem 1.5rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  transition: all 0.2s ease;
+  font-weight: 500;
+  border-left: 3px solid transparent;
+}
+
+.nav-item:hover {
+  background-color: rgba(137, 180, 250, 0.1);
+  color: var(--text-main);
+}
+
+.nav-item.active {
+  background-color: rgba(137, 180, 250, 0.15);
+  color: var(--primary);
+  border-left-color: var(--primary);
+}
+
+.sidebar-footer {
+  padding: 1rem 1.5rem;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.theme-toggle-btn {
+  background: none;
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.theme-toggle-btn:hover {
+  color: var(--text-main);
+  border-color: var(--text-main);
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.app-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
 }
 
 .app-header {
@@ -660,27 +767,39 @@ body {
    View Transitions (A09)
    ============================================ */
 
-/* 両ビューを重ねて配置し、opacity で滑らかに切替 */
+.views-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 両ビューを重ねて配置し、opacity と transform で滑らかに切替 */
 .view-layer {
   display: flex;
   flex-direction: column;
-  flex: 1;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   overflow: hidden;
-  transition: opacity 0.25s ease, visibility 0.25s ease;
-  will-change: opacity;
+  transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0.3s ease;
+  will-change: opacity, transform;
 }
 
 .view-layer.view-active {
   opacity: 1;
+  transform: translateY(0) scale(1);
   visibility: visible;
+  pointer-events: auto;
+  z-index: 1;
 }
 
 .view-layer.view-hidden {
   opacity: 0;
+  transform: translateY(10px) scale(0.98);
   visibility: hidden;
-  height: 0;
-  overflow: hidden;
-  flex: 0;
   pointer-events: none;
+  z-index: 0;
 }
 
