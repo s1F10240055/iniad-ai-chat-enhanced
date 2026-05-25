@@ -168,18 +168,16 @@ export class SearchOrchestrator {
 
     // 直近の会話履歴を追加（文字数上限内で最新ターンから追加）
     if (history && history.length > 0) {
-      const recentHistory = history.slice(-MAX_HISTORY_TURNS);
-      const deduped =
-        recentHistory.length > 0 &&
-        recentHistory[recentHistory.length - 1].role === "user" &&
-        recentHistory[recentHistory.length - 1].content === userText
-          ? recentHistory.slice(0, -1)
-          : recentHistory;
+      const last = history[history.length - 1];
+      const hasDup = last.role === "user" && last.content === userText;
+      const recentHistory = hasDup
+        ? history.slice(-(MAX_HISTORY_TURNS + 1), -1)
+        : history.slice(-MAX_HISTORY_TURNS);
 
       let historyChars = 0;
       const selected: ChatTurn[] = [];
-      for (let i = deduped.length - 1; i >= 0; i--) {
-        const turn = deduped[i];
+      for (let i = recentHistory.length - 1; i >= 0; i--) {
+        const turn = recentHistory[i];
         historyChars += turn.content.length;
         if (historyChars > MAX_HISTORY_CHARS) break;
         selected.unshift(turn);
