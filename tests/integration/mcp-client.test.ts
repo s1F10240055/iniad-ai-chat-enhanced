@@ -1,15 +1,18 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { McpClient } from "../../src/main/services/mcp-client";
+import { MoocsSearch } from "../../src/main/services/moocs-search";
 
 const username = process.env.INIAD_USERNAME;
 const password = process.env.INIAD_PASSWORD;
 const hasCredentials = !!(username && password);
 
-describe.skipIf(!hasCredentials)("McpClient (integration)", () => {
+describe.skipIf(!hasCredentials)("McpClient + MoocsSearch (integration)", () => {
   let client: McpClient;
+  let moocsSearch: MoocsSearch;
 
   beforeAll(async () => {
     client = new McpClient();
+    moocsSearch = new MoocsSearch(client);
     await client.connect(username!, password!);
   });
 
@@ -22,14 +25,14 @@ describe.skipIf(!hasCredentials)("McpClient (integration)", () => {
   });
 
   it("should return success with results for a valid query", async () => {
-    const result = await client.searchMoocs("Python");
+    const result = await moocsSearch.searchMoocs("Python");
 
     expect(result.success).toBe(true);
     expect(Array.isArray(result.results)).toBe(true);
   });
 
   it("should return results with correct SearchResult shape", async () => {
-    const result = await client.searchMoocs("Python");
+    const result = await moocsSearch.searchMoocs("Python");
 
     if (result.results.length === 0) return;
 
@@ -44,7 +47,7 @@ describe.skipIf(!hasCredentials)("McpClient (integration)", () => {
   });
 
   it("should return empty results for empty/whitespace query", async () => {
-    const result = await client.searchMoocs("   ");
+    const result = await moocsSearch.searchMoocs("   ");
 
     expect(result.success).toBe(true);
     expect(result.results).toHaveLength(0);
@@ -52,15 +55,16 @@ describe.skipIf(!hasCredentials)("McpClient (integration)", () => {
 
   it("should return error when not connected", async () => {
     const disconnectedClient = new McpClient();
-    const result = await disconnectedClient.searchMoocs("Python");
+    const disconnectedSearch = new MoocsSearch(disconnectedClient);
+    const result = await disconnectedSearch.searchMoocs("Python");
 
     expect(result.success).toBe(false);
     expect(result.error).toBeTruthy();
   });
 
   it("should cache repeated queries", async () => {
-    const first = await client.searchMoocs("Python");
-    const second = await client.searchMoocs("Python");
+    const first = await moocsSearch.searchMoocs("Python");
+    const second = await moocsSearch.searchMoocs("Python");
 
     expect(first.success).toBe(true);
     expect(second.success).toBe(true);

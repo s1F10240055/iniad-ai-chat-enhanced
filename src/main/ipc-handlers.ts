@@ -19,6 +19,7 @@ import { ipcMain, BrowserWindow } from "electron";
 import { toSerializableError } from "../shared/types/errors";
 import { InMemoryStore } from "./services/in-memory-store";
 import { McpClient } from "./services/mcp-client";
+import { MoocsSearch } from "./services/moocs-search";
 import { WebSearchClient } from "./services/web-search-client";
 import { SearchOrchestrator } from "./services/search-orchestrator";
 import { loginViaBrowser } from "./services/iniad-login";
@@ -29,8 +30,9 @@ import type { ChatResponse } from "../shared/types/chat";
 
 const store = new InMemoryStore();
 const mcpClient = new McpClient();
+const moocsSearch = new MoocsSearch(mcpClient);
 const webClient = new WebSearchClient();
-const orchestrator = new SearchOrchestrator(mcpClient, webClient);
+const orchestrator = new SearchOrchestrator(moocsSearch, webClient);
 let activeController: AbortController | null = null;
 
 // ── Helper: broadcast MCP status to all windows ────
@@ -184,6 +186,8 @@ export function registerIpcHandlers(): void {
       return { success: false, error: "MOOCs 認証情報が設定されていません" };
     }
 
+    moocsSearch.reset();
+
     return loginViaBrowser(
       settings.moocsUsername,
       settings.moocsPassword,
@@ -196,6 +200,7 @@ export function registerIpcHandlers(): void {
 export const testExports = {
   store,
   mcpClient,
+  moocsSearch,
   webClient,
   orchestrator,
 };

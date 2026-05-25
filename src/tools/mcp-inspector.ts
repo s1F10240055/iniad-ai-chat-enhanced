@@ -10,6 +10,7 @@
 
 import * as readline from "readline";
 import { McpClient } from "../main/services/mcp-client";
+import { MoocsSearch } from "../main/services/moocs-search";
 
 const username = process.env.INIAD_USERNAME;
 const password = process.env.INIAD_PASSWORD;
@@ -20,6 +21,7 @@ if (!username || !password) {
 }
 
 const client = new McpClient();
+const search = new MoocsSearch(client);
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -63,7 +65,7 @@ async function cmdSearch(query: string) {
     return;
   }
   console.log(`\n⟳ Searching: "${query}"...`);
-  const result = await client.searchMoocs(query);
+  const result = await search.searchMoocs(query);
   if (result.success) {
     log(`Search Results (${result.results.length} items)`, result.results);
   } else {
@@ -73,7 +75,7 @@ async function cmdSearch(query: string) {
 
 async function cmdCache() {
   console.log("\n⟳ Running cache cleanup...");
-  client.cleanupCache();
+  search.cleanupCache();
   logOk("Cache cleanup completed");
 }
 
