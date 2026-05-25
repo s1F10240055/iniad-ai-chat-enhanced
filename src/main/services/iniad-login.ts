@@ -50,6 +50,15 @@ export function loginViaBrowser(
 
       if (url.includes("idmanager") || url.includes("login")) {
         try {
+          const loginError = await loginWindow.webContents.executeJavaScript(`
+            const el = document.querySelector('[class*="error"], [class*="alert"], [role="alert"]');
+            el ? el.textContent.trim() : null
+          `);
+          if (loginError) {
+            finish({ success: false, error: `ログイン失敗: ${loginError}` });
+            return;
+          }
+
           await loginWindow.webContents.executeJavaScript(`
             const u = document.querySelector('input#username, input[name="username"], input[ref=s1e16]');
             const p = document.querySelector('input#password, input[name="password"], input[ref=s1e18]');
