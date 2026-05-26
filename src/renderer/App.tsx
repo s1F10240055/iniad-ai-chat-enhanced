@@ -189,19 +189,19 @@ const App: React.FC = () => {
 
       {/* 両ビューをコンテナ内に絶対配置し、スムーズにトランジション */}
       <div className="views-container">
-          <div className={`view-layer ${isChat ? "view-active" : "view-hidden"}`}>
-            <main className="app-main">
-              <ChatView messages={messages} />
-            </main>
-            <ChatInput onSend={handleSend} disabled={isLoading} />
-          </div>
-
-          <div className={`view-layer ${!isChat ? "view-active" : "view-hidden"}`}>
-            <main className="app-main">
-              <SettingsView onClose={() => switchView("chat")} />
-            </main>
-          </div>
+        <div className={`view-layer ${isChat ? "view-active" : "view-hidden"}`}>
+          <main className="app-main">
+            <ChatView messages={messages} />
+          </main>
+          <ChatInput onSend={handleSend} disabled={isLoading} />
         </div>
+
+        <div className={`view-layer ${!isChat ? "view-active" : "view-hidden"}`}>
+          <main className="app-main">
+            <SettingsView onClose={() => switchView("chat")} />
+          </main>
+        </div>
+      </div>
 
       <StatusBar mcpStatus={mcpConnectionStatus} model={modelName} />
     </div>
