@@ -23,5 +23,7 @@ export type {
   SearchSource,
 } from "./search";
 
+export type { SyllabusIndex, CourseEntry, ScheduleEntry, CourseMatch } from "./syllabus";
+
 export type { ErrorCode, SerializableError } from "./errors";
 export { AppError, toSerializableError } from "./errors";
