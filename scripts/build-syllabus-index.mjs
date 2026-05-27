@@ -202,8 +202,8 @@ function validateEntry(raw) {
     objectives: raw.objectives ? String(raw.objectives) : undefined,
     schedule: Array.isArray(raw.schedule)
       ? raw.schedule
-          .filter((s) => typeof s.week === "number" && typeof s.topic === "string")
-          .map((s) => ({ week: s.week, topic: s.topic }))
+          .map((s) => ({ week: parseInt(String(s.week).replace(/[^0-9]/g, ""), 10), topic: s.topic }))
+          .filter((s) => !isNaN(s.week) && typeof s.topic === "string")
       : [],
     prerequisites: Array.isArray(raw.prerequisites)
       ? raw.prerequisites.filter((p) => typeof p === "string")
