@@ -148,8 +148,14 @@ const EXTRACTION_PROMPT = `以下は東洋大学シラバスのHTMLから抽出�
 - JSON以外は絶対に出力しない`;
 
 async function extractWithLLM(structuredText) {
-  const truncated =
-    structuredText.length > 8000 ? structuredText.slice(0, 8000) : structuredText;
+  const MAX_INPUT = 8000;
+  let truncated;
+  if (structuredText.length > MAX_INPUT) {
+    const half = MAX_INPUT / 2;
+    truncated = structuredText.slice(0, half) + "\n…(中略)…\n" + structuredText.slice(-half);
+  } else {
+    truncated = structuredText;
+  }
 
   const res = await fetch(`${API_URL}/chat/completions`, {
     method: "POST",
