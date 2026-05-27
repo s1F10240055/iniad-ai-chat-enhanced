@@ -25,6 +25,7 @@ const OUTPUT_PATH = process.env.SYLLABUS_OUTPUT_PATH || "data/syllabus-index.jso
 
 const SYLLABUS_BASE = "https://g-sys.toyo.ac.jp/syllabus";
 const REQUEST_DELAY_MS = 1500;
+const FETCH_TIMEOUT_MS = 30_000;
 
 // ── バリデーション ────────────────────────────────────
 
@@ -63,6 +64,7 @@ async function searchSyllabus(courseName) {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: params.toString(),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
 
   if (!res.ok) {
@@ -79,7 +81,7 @@ function extractDetailUrls(html) {
   $("a[href]").each((_, el) => {
     const href = $(el).attr("href");
     if (href && href.includes("/syllabus/html/gakugai/")) {
-      const full = href.startsWith("http") ? href : `${SYLLABUS_BASE}${href.replace(/^\.\./, "")}`;
+      const full = new URL(href, `${SYLLABUS_BASE}/result`).href;
       if (!urls.includes(full)) urls.push(full);
     }
   });
@@ -88,7 +90,7 @@ function extractDetailUrls(html) {
 }
 
 async function fetchDetailPage(url) {
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   if (!res.ok) {
     throw new Error(`Failed to fetch detail page (${res.status}): ${url}`);
   }
@@ -155,6 +157,7 @@ async function extractWithLLM(structuredText) {
       "Content-Type": "application/json",
       Authorization: `Bearer ${API_KEY}`,
     },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     body: JSON.stringify({
       model: MODEL,
       messages: [
