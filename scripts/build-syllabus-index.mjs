@@ -76,17 +76,23 @@ async function searchSyllabus(courseName) {
 
 function extractDetailUrls(html) {
   const $ = cheerioLoad(html);
-  const urls = [];
+  const results = [];
 
   $("a[href]").each((_, el) => {
     const href = $(el).attr("href");
     if (href && href.includes("/syllabus/html/gakugai/")) {
       const full = new URL(href, `${SYLLABUS_BASE}/result`).href;
-      if (!urls.includes(full)) urls.push(full);
+      if (!results.some((r) => r.url === full)) {
+        results.push({ url: full, label: $(el).text().trim() });
+      }
     }
   });
 
-  return urls;
+  return results;
+}
+
+function normalizeName(name) {
+  return name.replace(/[\s　]/g, "").toLowerCase();
 }
 
 async function fetchDetailPage(url) {
@@ -223,9 +229,9 @@ async function processCourse(courseName) {
 
   try {
     const searchHtml = await searchSyllabus(courseName);
-    const detailUrls = extractDetailUrls(searchHtml);
+    const searchResults = extractDetailUrls(searchHtml);
 
-    if (detailUrls.length === 0) {
+    if (searchResults.length === 0) {
       console.warn(`  ⚠ No detail page found for "${courseName}"`);
       return {
         courseName,
@@ -236,16 +242,36 @@ async function processCourse(courseName) {
       };
     }
 
+    let matched;
+    if (searchResults.length > 1) {
+      const norm = normalizeName(courseName);
+      matched = searchResults.find((r) => normalizeName(r.label) === norm);
+      if (!matched) {
+        console.warn(
+          `  ⚠ Multiple results for "${courseName}" but no exact match: ${searchResults.map((r) => r.label).join(", ")}`
+        );
+        return {
+          courseName,
+          schedule: [],
+          prerequisites: [],
+          keywords: [],
+          status: "partial",
+        };
+      }
+    } else {
+      matched = searchResults[0];
+    }
+
     await delay(REQUEST_DELAY_MS);
 
-    const detailHtml = await fetchDetailPage(detailUrls[0]);
+    const detailHtml = await fetchDetailPage(matched.url);
     const structuredText = extractStructuredText(detailHtml);
 
     await delay(REQUEST_DELAY_MS);
 
     const raw = await extractWithLLM(structuredText);
     const entry = validateEntry(raw);
-    entry.syllabusUrl = detailUrls[0];
+    entry.syllabusUrl = matched.url;
 
     console.log(
       `  ✅ ${entry.courseName} — ${entry.schedule.length} weeks, ${entry.keywords.length} keywords`
