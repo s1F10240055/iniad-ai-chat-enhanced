@@ -318,6 +318,11 @@ async function main() {
     `\n📄 Written to ${OUTPUT_PATH}` +
       `\n   Total: ${courses.length} courses (ok: ${okCount}, partial: ${partialCount}, error: ${errorCount})`
   );
+
+  if (okCount === 0) {
+    console.error("Error: No courses were successfully processed");
+    process.exitCode = 1;
+  }
 }
 
 main().catch((err) => {
