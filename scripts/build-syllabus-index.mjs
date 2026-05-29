@@ -92,7 +92,7 @@ function extractDetailUrls(html) {
 }
 
 function normalizeName(name) {
-  return name.replace(/[\s　]/g, "").toLowerCase();
+  return name.replace(/\s/g, "").toLowerCase();
 }
 
 async function fetchDetailPage(url) {
