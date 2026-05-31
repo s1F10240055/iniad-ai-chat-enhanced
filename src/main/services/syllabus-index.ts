@@ -63,10 +63,11 @@ export class SyllabusIndexService {
   }
 
   private matchCourse(course: CourseEntry, tokens: string[]): CourseMatch | null {
+    const courseName = course.courseName ?? "";
     const keywords = Array.isArray(course.keywords) ? course.keywords : [];
     const schedule = Array.isArray(course.schedule) ? course.schedule : [];
     const searchableFields = [
-      course.courseName ?? "",
+      courseName,
       course.description ?? "",
       course.objectives ?? "",
       ...keywords,
@@ -83,8 +84,12 @@ export class SyllabusIndexService {
         matched++;
       }
 
-      for (const entry of course.schedule) {
-        if (entry.topic.toLowerCase().includes(token) && !matchedSchedule.includes(entry)) {
+      for (const entry of schedule) {
+        if (
+          entry?.topic &&
+          entry.topic.toLowerCase().includes(token) &&
+          !matchedSchedule.includes(entry)
+        ) {
           matchedSchedule.push(entry);
         }
       }
@@ -96,7 +101,7 @@ export class SyllabusIndexService {
     const confidence = Math.min(1, matched / tokens.length + (allMatched ? 0.1 : 0));
 
     return {
-      courseName: course.courseName,
+      courseName,
       confidence,
       matchedScheduleEntries: matchedSchedule.length > 0 ? matchedSchedule : undefined,
     };
