@@ -1,6 +1,5 @@
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import path from "path";
-import { app } from "electron";
 import type {
   SyllabusIndex,
   CourseEntry,
@@ -8,11 +7,15 @@ import type {
   CourseMatch,
 } from "../../shared/types/syllabus";
 
-const DEFAULT_INDEX_PATH = path.join(
-  process.resourcesPath ?? __dirname,
-  "data",
-  "syllabus-index.json"
-);
+function resolveDefaultIndexPath(): string {
+  const candidates = [
+    path.join(process.resourcesPath ?? __dirname, "data", "syllabus-index.json"),
+    path.resolve(__dirname, "..", "..", "..", "data", "syllabus-index.json"),
+  ];
+  return candidates.find((p) => existsSync(p)) ?? candidates[0];
+}
+
+const DEFAULT_INDEX_PATH = resolveDefaultIndexPath();
 const MIN_TOKEN_LENGTH = 2;
 
 const STOP_WORDS = /(?:から|まで|について|また|やで|もの|教えて|ください|です|ます|して|の|回答)/;
