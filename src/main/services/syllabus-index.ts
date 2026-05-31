@@ -63,12 +63,14 @@ export class SyllabusIndexService {
   }
 
   private matchCourse(course: CourseEntry, tokens: string[]): CourseMatch | null {
+    const keywords = Array.isArray(course.keywords) ? course.keywords : [];
+    const schedule = Array.isArray(course.schedule) ? course.schedule : [];
     const searchableFields = [
-      course.courseName,
+      course.courseName ?? "",
       course.description ?? "",
       course.objectives ?? "",
-      ...course.keywords,
-      ...course.schedule.map((s) => s.topic),
+      ...keywords,
+      ...schedule.map((s) => s?.topic ?? ""),
     ];
 
     const searchableText = searchableFields.join(" ").toLowerCase();
