@@ -17,7 +17,8 @@
     "type-check": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:integration": "vitest run --config vitest.config.mts tests/integration"
+    "test:integration": "vitest run --config vitest.config.mts tests/integration",
+    "build:syllabus-index": "node scripts/build-syllabus-index.mjs"
   },
   "keywords": [],
   "author": {
@@ -43,6 +44,7 @@
     "@electron-forge/plugin-webpack": "^7.11.1",
     "@electron/fuses": "^1.8.0",
     "@types/react": "^19.2.14",
+    "cheerio": "^1.0.0",
     "@types/react-dom": "^19.2.3",
     "@typescript-eslint/eslint-plugin": "^8.18.2",
     "@typescript-eslint/parser": "^8.18.2",
