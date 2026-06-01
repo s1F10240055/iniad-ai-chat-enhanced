@@ -22,6 +22,7 @@ import { McpClient } from "./services/mcp-client";
 import { MoocsSearch } from "./services/moocs-search";
 import { WebSearchClient } from "./services/web-search-client";
 import { SearchOrchestrator } from "./services/search-orchestrator";
+import { SyllabusIndexService } from "./services/syllabus-index";
 import { loginViaBrowser } from "./services/iniad-login";
 import { settingsStore } from "./services/settings-store";
 import type { ChatTurn } from "../shared/types/chat";
@@ -32,8 +33,11 @@ const store = new InMemoryStore();
 const mcpClient = new McpClient();
 const moocsSearch = new MoocsSearch(mcpClient);
 const webClient = new WebSearchClient();
-const orchestrator = new SearchOrchestrator(moocsSearch, webClient);
+const syllabusService = new SyllabusIndexService();
+const orchestrator = new SearchOrchestrator(moocsSearch, webClient, syllabusService);
 let activeController: AbortController | null = null;
+
+syllabusService.load();
 
 // ── Helper: broadcast MCP status to all windows ────
 

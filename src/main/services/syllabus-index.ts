@@ -24,7 +24,7 @@ const SPLIT_CHARS = /[のはがをにでともへや、。！？・\s\-_.：:；
 export class SyllabusIndexService {
   private index: SyllabusIndex | null = null;
 
-  async load(indexPath?: string): Promise<void> {
+  load(indexPath?: string): void {
     const filePath = indexPath ?? DEFAULT_INDEX_PATH;
 
     try {
