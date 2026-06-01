@@ -124,8 +124,8 @@ export class SearchOrchestrator {
     if (trimmedQuery && this.syllabusService?.isLoaded()) {
       syllabusMatches = this.syllabusService.matchCourses(trimmedQuery);
       if (syllabusMatches.length > 0) {
-        const matchNames = syllabusMatches.map((m) => m.courseName).join(" ");
-        expandedQuery = `${trimmedQuery} ${matchNames}`;
+        const topMatch = syllabusMatches[0].courseName;
+        expandedQuery = `${trimmedQuery} ${topMatch}`;
         console.log(
           `[RAG] Syllabus matched: ${syllabusMatches.map((m) => `${m.courseName}(${(m.confidence * 100).toFixed(0)}%)`).join(", ")}`
         );
