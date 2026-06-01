@@ -14,6 +14,8 @@ import type {
   ChatTurn,
   Citation,
 } from "../../shared/types/chat";
+import type { CourseMatch } from "../../shared/types/syllabus";
+import type { SyllabusIndexService } from "./syllabus-index";
 export interface IMoocsSearchProvider {
   searchMoocs(
     query: string
@@ -44,7 +46,8 @@ const RAG_SYSTEM_PROMPT = `あなたは INIAD MOOCs の学習アシスタント�
 export class SearchOrchestrator {
   constructor(
     private mcpClient: IMoocsSearchProvider,
-    private webClient: IWebSearchProvider
+    private webClient: IWebSearchProvider,
+    private syllabusService?: SyllabusIndexService
   ) {}
 
   /**
@@ -114,14 +117,28 @@ export class SearchOrchestrator {
       throw new Error("API キーが設定されていません。設定画面から入力してください。");
     }
 
-    // 1. 検索（ソースごとに状況を追跡）
+    // 1. シラバスインデックスでクエリ拡張
     const trimmedQuery = userText.trim();
+    let expandedQuery = trimmedQuery;
+    let syllabusMatches: CourseMatch[] = [];
+    if (trimmedQuery && this.syllabusService?.isLoaded()) {
+      syllabusMatches = this.syllabusService.matchCourses(trimmedQuery);
+      if (syllabusMatches.length > 0) {
+        const matchNames = syllabusMatches.map((m) => m.courseName).join(" ");
+        expandedQuery = `${trimmedQuery} ${matchNames}`;
+        console.log(
+          `[RAG] Syllabus matched: ${syllabusMatches.map((m) => `${m.courseName}(${(m.confidence * 100).toFixed(0)}%)`).join(", ")}`
+        );
+      }
+    }
+
+    // 2. 検索（ソースごとに状況を追跡）
     const searchResults: SearchResult[] = [];
     const statusLines: string[] = [];
 
     if (trimmedQuery) {
       const [moocsResult, webResult] = await Promise.allSettled([
-        this.mcpClient.searchMoocs(trimmedQuery),
+        this.mcpClient.searchMoocs(expandedQuery),
         this.webClient.search(trimmedQuery),
       ]);
 
@@ -157,10 +174,11 @@ export class SearchOrchestrator {
       searchResults.splice(10);
     }
 
-    // 2. コンテキスト構築（常に検索状況を含める）
-    const context = this.buildContextWithStatus(searchResults, statusLines);
+    // 3. コンテキスト構築（常に検索状況を含める）
+    const syllabusContext = this.buildSyllabusContext(syllabusMatches);
+    const context = this.buildContextWithStatus(searchResults, statusLines, syllabusContext);
 
-    // 3. メッセージ構築（会話履歴を含める）
+    // 4. メッセージ構築（会話履歴を含める）
     const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
       { role: "system", content: RAG_SYSTEM_PROMPT },
       { role: "user", content: context },
@@ -190,7 +208,7 @@ export class SearchOrchestrator {
 
     messages.push({ role: "user", content: userText });
 
-    // 4. API 呼び出し
+    // 5. API 呼び出し
     const apiUrl = `${settings.baseURL}/chat/completions`;
     const requestBody = {
       model: settings.model,
@@ -229,8 +247,16 @@ export class SearchOrchestrator {
   /**
    * 検索状況 + 結果をフォーマットする
    */
-  private buildContextWithStatus(results: SearchResult[], statusLines: string[]): string {
+  private buildContextWithStatus(
+    results: SearchResult[],
+    statusLines: string[],
+    syllabusContext?: string
+  ): string {
     const lines: string[] = ["【検索状況】", ...statusLines];
+
+    if (syllabusContext) {
+      lines.push("", syllabusContext);
+    }
 
     if (results.length > 0) {
       lines.push("\n【検索結果】");
@@ -251,6 +277,25 @@ export class SearchOrchestrator {
 
     const full = lines.join("\n");
     return full.length > MAX_CONTEXT_CHARS ? full.slice(0, MAX_CONTEXT_CHARS) + "\n..." : full;
+  }
+
+  /**
+   * シラバスマッチ結果をコンテキスト文字列にフォーマットする
+   */
+  private buildSyllabusContext(matches: CourseMatch[]): string {
+    if (matches.length === 0) return "";
+
+    const lines: string[] = ["【シラバス情報】"];
+    for (const match of matches) {
+      lines.push(`関連講義: ${match.courseName} (信頼度: ${(match.confidence * 100).toFixed(0)}%)`);
+      if (match.matchedScheduleEntries && match.matchedScheduleEntries.length > 0) {
+        const topics = match.matchedScheduleEntries
+          .map((s) => `第${s.week}回: ${s.topic}`)
+          .join(", ");
+        lines.push(`該当週: ${topics}`);
+      }
+    }
+    return lines.join("\n");
   }
 
   /**
