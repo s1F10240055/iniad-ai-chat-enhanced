@@ -21,19 +21,27 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ turn }) => {
 
   const handleCopy = useCallback(async () => {
     if (!turn.content) return;
+    let success = false;
     try {
       await navigator.clipboard.writeText(turn.content);
+      success = true;
     } catch {
-      const textarea = document.createElement("textarea");
-      textarea.value = turn.content;
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand("copy");
-      document.body.removeChild(textarea);
+      try {
+        const textarea = document.createElement("textarea");
+        textarea.value = turn.content;
+        document.body.appendChild(textarea);
+        textarea.select();
+        success = document.execCommand("copy");
+        document.body.removeChild(textarea);
+      } catch {
+        success = false;
+      }
     }
-    setCopied(true);
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    timeoutRef.current = setTimeout(() => setCopied(false), 1500);
+    setCopied(success);
+    if (success) {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      timeoutRef.current = setTimeout(() => setCopied(false), 1500);
+    }
   }, [turn.content]);
 
   return (
