@@ -256,6 +256,7 @@ body {
   position: absolute;
   top: 0.25rem;
   right: 0.25rem;
+  z-index: 1;
   background: var(--bg-panel);
   border: 1px solid var(--border-color);
   border-radius: 4px;

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import { ChatTurn } from "../../shared/types/chat";
 import { CitationPanel } from "./CitationPanel";
 
@@ -9,12 +9,20 @@ interface MessageBubbleProps {
 export const MessageBubble: React.FC<MessageBubbleProps> = ({ turn }) => {
   const isUser = turn.role === "user";
   const [copied, setCopied] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleCopy = async () => {
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleCopy = useCallback(async () => {
+    if (!turn.content) return;
     try {
       await navigator.clipboard.writeText(turn.content);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
     } catch {
       const textarea = document.createElement("textarea");
       textarea.value = turn.content;
@@ -22,10 +30,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ turn }) => {
       textarea.select();
       document.execCommand("copy");
       document.body.removeChild(textarea);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
     }
-  };
+    setCopied(true);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => setCopied(false), 1500);
+  }, [turn.content]);
 
   return (
     <div className={`message-bubble-wrapper ${isUser ? "user" : "assistant"}`}>
@@ -74,9 +83,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ turn }) => {
             className={`message-copy-button ${copied ? "copied" : ""}`}
             onClick={handleCopy}
             title="コピー"
+            aria-label={copied ? "コピーしました" : "メッセージをコピー"}
           >
             {copied ? (
               <svg
+                aria-hidden="true"
                 width="14"
                 height="14"
                 viewBox="0 0 24 24"
@@ -90,6 +101,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ turn }) => {
               </svg>
             ) : (
               <svg
+                aria-hidden="true"
                 width="14"
                 height="14"
                 viewBox="0 0 24 24"
