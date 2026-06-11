@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 
 interface ChatInputProps {
   onSend: (text: string) => void;
@@ -8,6 +8,9 @@ interface ChatInputProps {
 export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const historyRef = useRef<string[]>([]);
+  const historyIndexRef = useRef<number>(-1);
+  const draftRef = useRef<string>("");
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -16,22 +19,55 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
     }
   }, [text]);
 
-  const handleSubmit = (e?: React.SyntheticEvent) => {
-    e?.preventDefault();
-    if (text.trim() && !disabled) {
-      onSend(text.trim());
-      setText("");
-      if (textareaRef.current) {
-        textareaRef.current.style.height = "auto";
+  const handleSubmit = useCallback(
+    (e?: React.SyntheticEvent) => {
+      e?.preventDefault();
+      if (text.trim() && !disabled) {
+        onSend(text.trim());
+        historyRef.current = [...historyRef.current, text.trim()];
+        historyIndexRef.current = -1;
+        draftRef.current = "";
+        setText("");
+        if (textareaRef.current) {
+          textareaRef.current.style.height = "auto";
+        }
       }
-    }
-  };
+    },
+    [text, disabled, onSend]
+  );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.nativeEvent && e.nativeEvent.isComposing) return;
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSubmit(e);
+      return;
+    }
+
+    const history = historyRef.current;
+    if (history.length === 0) return;
+
+    if (e.key === "ArrowUp" && text === "") {
+      e.preventDefault();
+      if (historyIndexRef.current === -1) {
+        draftRef.current = "";
+        historyIndexRef.current = history.length - 1;
+      } else if (historyIndexRef.current > 0) {
+        historyIndexRef.current--;
+      }
+      setText(history[historyIndexRef.current]);
+    }
+
+    if (e.key === "ArrowDown" && historyIndexRef.current !== -1) {
+      e.preventDefault();
+      if (historyIndexRef.current < history.length - 1) {
+        historyIndexRef.current++;
+        setText(history[historyIndexRef.current]);
+      } else {
+        historyIndexRef.current = -1;
+        setText(draftRef.current);
+      }
     }
   };
 
@@ -42,9 +78,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
           ref={textareaRef}
           className="chat-input-textarea"
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            if (historyIndexRef.current !== -1) {
+              historyIndexRef.current = -1;
+            }
+          }}
           onKeyDown={handleKeyDown}
-          placeholder="質問を入力... (Enterで送信, Shift+Enterで改行)"
+          placeholder="質問を入力... (Enterで送信, Shift+Enterで改行, ↑で履歴)"
           aria-label="Chat message input"
           disabled={disabled}
           rows={1}
