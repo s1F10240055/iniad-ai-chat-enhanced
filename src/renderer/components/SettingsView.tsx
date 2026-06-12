@@ -255,7 +255,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
         const result = await window.electronAPI.testMcpConnection();
         setMcpTestResult({
           status: result.success ? "success" : "error",
-          message: result.success ? "ログイン成功・接続完了" : result.error || "接続失敗",
+          message: result.success ? "MCP接続成功" : result.error || "接続失敗",
         });
       } else {
         setMcpTestResult({ status: "success", message: "接続成功（モック）" });
@@ -485,8 +485,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
             INIAD MOOCs 認証
           </h3>
           <p className="settings-section-description">
-            学籍番号とパスワードを入力後、「ログインして接続」を押してください。
-            INIADのログイン画面が開き、認証成功後に自動でMCPサーバーに接続します。
+            学籍番号とパスワードを入力後、「接続テスト」を押してください。
+            認証情報を使って MCP サーバー（Playwright）経由で MOOCs に接続します。起動時・チャット送信時にも自動接続を試みます。
           </p>
 
           <div className="settings-field">
@@ -549,7 +549,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
             {errors.moocsPassword && <span className="settings-error">{errors.moocsPassword}</span>}
           </div>
 
-          {renderTestButton("ログインして接続", mcpTestResult, handleTestMcp)}
+          {renderTestButton("接続テスト", mcpTestResult, handleTestMcp)}
         </section>
       </div>
 

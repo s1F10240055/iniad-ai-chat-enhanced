@@ -1,0 +1,34 @@
+name: Update slides index
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 1 * *"
+
+jobs:
+  build-slides-index:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build slides index
+        run: npm run build:slides-index
+
+      - name: Commit if changed
+        run: |
+          if git diff --quiet data/slides-index.json; then
+            echo "No changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/slides-index.json
+          git commit -m "chore: update slides index"
+          git push

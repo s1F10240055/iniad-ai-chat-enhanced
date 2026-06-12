@@ -8,9 +8,17 @@ import type {
 } from "../../shared/types/syllabus";
 
 function resolveDefaultIndexPath(): string {
+  // webpack 出力 (.webpack/main) からプロジェクトルートを推測
+  // __dirname が .webpack/main の場合、2階層上がプロジェクトルート
+  const projectRoot = path.resolve(__dirname, "..", "..");
+
   const candidates = [
-    path.join(process.resourcesPath ?? __dirname, "data", "syllabus-index.json"),
-    path.resolve(__dirname, "..", "..", "..", "data", "syllabus-index.json"),
+    // 開発時: プロジェクトルート/data
+    path.join(projectRoot, "data", "syllabus-index.json"),
+    // ビルド時: Electron resourcesPath/data
+    path.join(process.resourcesPath ?? "", "data", "syllabus-index.json"),
+    // フォールバック: __dirname から辿る
+    path.resolve(__dirname, "..", "..", "data", "syllabus-index.json"),
   ];
   return candidates.find((p) => existsSync(p)) ?? candidates[0];
 }
@@ -59,7 +67,12 @@ export class SyllabusIndexService {
     }
 
     matches.sort((a, b) => b.confidence - a.confidence);
-    return matches.slice(0, 3);
+    const top = matches.slice(0, 3);
+    console.log(
+      `[SyllabusIndex] matchCourses("${query}") → tokens=${JSON.stringify(tokens)}, ` +
+        `matches=${top.map((m) => `${m.courseName}(${(m.confidence * 100).toFixed(0)}%)`).join(", ")}`
+    );
+    return top;
   }
 
   private matchCourse(course: CourseEntry, tokens: string[]): CourseMatch | null {

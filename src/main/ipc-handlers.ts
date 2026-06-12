@@ -4,7 +4,7 @@
  * RendererプロセスからのIPCリクエストを処理するハンドラーを登録する。
  *
  * チャネル:
- * - chat:send: チャットメッセージを送信（RAG パイプライン）
+ * - chat:send: チャットメッセージを送信（エージェント + ツール呼び出し）
  * - chat:cancel: チャット送信をキャンセル
  * - chat:list: チャット履歴を取得
  * - chat:clear: チャット履歴をクリア
@@ -22,8 +22,10 @@ import { McpClient } from "./services/mcp-client";
 import { MoocsSearch } from "./services/moocs-search";
 import { WebSearchClient } from "./services/web-search-client";
 import { SearchOrchestrator } from "./services/search-orchestrator";
+import { ChatAgent } from "./services/chat-agent";
 import { SyllabusIndexService } from "./services/syllabus-index";
-import { loginViaBrowser } from "./services/iniad-login";
+import { SlidesIndexService } from "./services/slides-index";
+import { ensureMcpConnected } from "./services/mcp-connection";
 import { settingsStore } from "./services/settings-store";
 import type { ChatTurn } from "../shared/types/chat";
 import type { McpStatus } from "../shared/types/settings";
@@ -34,10 +36,13 @@ const mcpClient = new McpClient();
 const moocsSearch = new MoocsSearch(mcpClient);
 const webClient = new WebSearchClient();
 const syllabusService = new SyllabusIndexService();
-const orchestrator = new SearchOrchestrator(moocsSearch, webClient, syllabusService);
+const slidesService = new SlidesIndexService();
+const orchestrator = new SearchOrchestrator(moocsSearch, webClient, syllabusService, slidesService);
+const chatAgent = new ChatAgent(mcpClient, webClient, syllabusService, slidesService);
 let activeController: AbortController | null = null;
 
 syllabusService.load();
+slidesService.load();
 
 // ── Helper: broadcast MCP status to all windows ────
 
@@ -66,6 +71,9 @@ async function withErrorHandler<T>(
 // ── Register IPC handlers ───────────────────────────
 
 export function registerIpcHandlers(): void {
+  // 保存済み認証情報があればバックグラウンドで MCP 接続を試みる
+  void tryAutoConnectMcp();
+
   // ── チャット操作 ──
 
   ipcMain.handle("chat:send", async (_event, userText: string) => {
@@ -89,7 +97,20 @@ export function registerIpcHandlers(): void {
       };
       store.addMessage(userMessage);
 
-      const response: ChatResponse = await orchestrator.chatWithRAG(
+      // MOOCs 検索のため、未接続時は認証情報があれば自動接続を試みる
+      if (mcpClient.getStatus() !== "connected" && settingsStore.hasMoocsCredentials()) {
+        const connectResult = await ensureMcpConnected(
+          mcpClient,
+          moocsSearch,
+          broadcastMcpStatus,
+          settings
+        );
+        if (!connectResult.connected) {
+          console.warn("[chat:send] MCP auto-connect failed:", connectResult.error);
+        }
+      }
+
+      const response: ChatResponse = await chatAgent.chat(
         userText,
         settings,
         activeController.signal,
@@ -190,15 +211,36 @@ export function registerIpcHandlers(): void {
       return { success: false, error: "MOOCs 認証情報が設定されていません" };
     }
 
-    moocsSearch.reset();
-
-    return loginViaBrowser(
-      settings.moocsUsername,
-      settings.moocsPassword,
+    const result = await ensureMcpConnected(
       mcpClient,
-      broadcastMcpStatus
+      moocsSearch,
+      broadcastMcpStatus,
+      settings
     );
+
+    return result.connected
+      ? { success: true }
+      : { success: false, error: result.error ?? "MCP接続に失敗しました" };
   });
+}
+
+async function tryAutoConnectMcp(): Promise<void> {
+  if (!settingsStore.hasMoocsCredentials()) return;
+  if (mcpClient.getStatus() === "connected") return;
+
+  const settings = settingsStore.getRawSettings();
+  const result = await ensureMcpConnected(
+    mcpClient,
+    moocsSearch,
+    broadcastMcpStatus,
+    settings
+  );
+
+  if (result.connected) {
+    console.log("[McpConnection] Auto-connected on startup");
+  } else {
+    console.warn("[McpConnection] Auto-connect on startup failed:", result.error);
+  }
 }
 
 export const testExports = {
@@ -207,4 +249,5 @@ export const testExports = {
   moocsSearch,
   webClient,
   orchestrator,
+  chatAgent,
 };

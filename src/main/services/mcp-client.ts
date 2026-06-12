@@ -7,8 +7,10 @@ import { AppError } from "../../shared/types/errors";
 import type { CourseSummary, LectureLink, SlideLink } from "../../shared/types/search";
 import type { McpStatus } from "../../shared/types/settings";
 
-const TOOL_TIMEOUT_MS = 30_000;
-const CONNECT_TIMEOUT_MS = 15_000;
+const TOOL_TIMEOUT_MS = 45_000;
+const GOOGLE_LOGIN_TIMEOUT_MS = 90_000;
+const CONNECT_TIMEOUT_MS = 30_000;
+const LOGIN_TOOL_TIMEOUT_MS = 90_000;
 
 export class McpClient {
   private status: McpStatus = "disconnected";
@@ -17,6 +19,37 @@ export class McpClient {
 
   getStatus(): McpStatus {
     return this.status;
+  }
+
+  /** 子プロセスが生存し、ツール一覧が取得できるか確認する */
+  async ping(): Promise<boolean> {
+    if (!this.client || this.status !== "connected") return false;
+
+    try {
+      await this.client.request(
+        { method: "tools/list", params: {} },
+        z.object({ tools: z.any() }),
+        { timeout: 5_000 }
+      );
+      return true;
+    } catch {
+      this.status = "disconnected";
+      await this.cleanupResources();
+      return false;
+    }
+  }
+
+  isConnectionError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return (
+      message.includes("not initialized") ||
+      message.includes("not connected") ||
+      message.includes("Connection closed") ||
+      message.includes("ECONNRESET") ||
+      message.includes("EPIPE") ||
+      message.includes("spawn") ||
+      message.includes("ENOENT")
+    );
   }
 
   async connect(username: string, password: string): Promise<void> {
@@ -31,9 +64,10 @@ export class McpClient {
       const pkgDir = path.dirname(require.resolve("@rarandeyo/iniad-moocs-mcp/package.json"));
       const cliPath = path.join(pkgDir, "cli.js");
 
+      // Playwright のバンドル Chromium を使用（Electron バイナリは使用不可）
       this.transport = new StdioClientTransport({
         command: "node",
-        args: [cliPath],
+        args: [cliPath, "--headless"],
         env: {
           ...process.env,
           INIAD_USERNAME: username,
@@ -43,6 +77,8 @@ export class McpClient {
 
       this.client = new Client({ name: "iniad-ai-chat", version: "1.0.0" }, { capabilities: {} });
 
+      console.log(`[McpClient] Connecting to MCP server... (cliPath: ${cliPath})`);
+      console.log(`[McpClient] Username provided: ${username ? "yes" : "NO"}`);
       await Promise.race([
         this.client.connect(this.transport),
         new Promise<never>((_, reject) =>
@@ -53,9 +89,14 @@ export class McpClient {
         ),
       ]);
 
+      console.log(`[McpClient] Connected successfully`);
       this.status = "connected";
     } catch (error) {
       this.status = "disconnected";
+      console.error(
+        `[McpClient] Connection failed:`,
+        error instanceof Error ? error.message : error
+      );
       await this.cleanupResources();
       throw this.classifyError(error);
     }
@@ -68,17 +109,25 @@ export class McpClient {
 
   // ── ツール呼び出し ──────────────────────────────
 
-  async callToolSafe(toolName: string, args?: Record<string, unknown>): Promise<unknown> {
+  async callToolSafe(
+    toolName: string,
+    args?: Record<string, unknown>,
+    timeoutMs = TOOL_TIMEOUT_MS
+  ): Promise<unknown> {
     if (!this.client) {
       throw new Error("MCP client is not initialized");
     }
 
+    console.log(`[McpClient] callToolSafe: "${toolName}"`, args ?? {});
     try {
-      return await this.client.callTool({ name: toolName, arguments: args }, undefined, {
-        timeout: TOOL_TIMEOUT_MS,
+      const result = await this.client.callTool({ name: toolName, arguments: args }, undefined, {
+        timeout: timeoutMs,
       });
+      console.log(`[McpClient] callToolSafe "${toolName}" succeeded`);
+      return result;
     } catch (callToolError) {
       const errMsg = callToolError instanceof Error ? callToolError.message : "";
+      console.warn(`[McpClient] callToolSafe "${toolName}" error:`, errMsg);
 
       if (
         errMsg.includes("validation") ||
@@ -89,7 +138,7 @@ export class McpClient {
         return await this.client.request(
           { method: "tools/call", params: { name: toolName, arguments: args ?? {} } },
           z.any(),
-          { timeout: TOOL_TIMEOUT_MS }
+          { timeout: timeoutMs }
         );
       }
 
@@ -97,9 +146,21 @@ export class McpClient {
     }
   }
 
+  async loginToMoocs(): Promise<unknown> {
+    return this.callToolSafe(
+      "loginToIniadMoocsWithIniadAccount",
+      undefined,
+      LOGIN_TOOL_TIMEOUT_MS
+    );
+  }
+
   async fetchCourses(): Promise<CourseSummary[]> {
     const result = await this.callToolSafe("listCourses");
     return this.parseToolResult<CourseSummary>(result);
+  }
+
+  async navigateTo(url: string): Promise<void> {
+    await this.callToolSafe("browser_navigate", { url });
   }
 
   async fetchLectureLinks(): Promise<LectureLink[]> {
@@ -110,6 +171,33 @@ export class McpClient {
   async fetchSlideLinks(): Promise<SlideLink[]> {
     const result = await this.callToolSafe("listSlideLinks");
     return this.parseToolResult<SlideLink>(result);
+  }
+
+  /**
+   * 現在のページのアクセシビリティスナップショット（テキスト）を取得する
+   */
+  async loginToGoogle(): Promise<void> {
+    await this.callToolSafe("loginToGoogleWithIniadAccount", undefined, GOOGLE_LOGIN_TIMEOUT_MS);
+  }
+
+  async expandSlideTab(): Promise<void> {
+    await this.callToolSafe("expandSlideTab");
+  }
+
+  async extractGoogleSlideText(): Promise<unknown> {
+    return this.callToolSafe("extractGoogleSlideText", undefined, 90_000);
+  }
+
+  async getPageSnapshot(): Promise<string | null> {
+    const result = await this.callToolSafe("browser_snapshot");
+    const typedResult = result as { content?: Array<{ type: string; text?: string }> } | undefined;
+    if (!typedResult?.content) return null;
+    for (const item of typedResult.content) {
+      if (item.type === "text" && item.text) {
+        return item.text;
+      }
+    }
+    return null;
   }
 
   parseToolResult<T>(result: unknown): T[] {

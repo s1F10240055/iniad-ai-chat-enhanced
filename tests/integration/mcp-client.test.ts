@@ -71,6 +71,11 @@ describe.skipIf(!hasCredentials)("McpClient + MoocsSearch (integration)", () => 
     expect(first.results).toEqual(second.results);
   });
 
+  it("should expose Google login and expandSlideTab MCP tools", async () => {
+    await expect(client.loginToGoogle()).resolves.toBeUndefined();
+    await expect(client.expandSlideTab()).resolves.toBeUndefined();
+  });
+
   it("should have disconnected status after disconnect()", async () => {
     const tempClient = new McpClient();
     await tempClient.connect(username!, password!);
