@@ -17,32 +17,16 @@
 
 import { ipcMain, BrowserWindow } from "electron";
 import { toSerializableError } from "../shared/types/errors";
-import { InMemoryStore } from "./services/in-memory-store";
-import { McpClient } from "./services/mcp-client";
-import { MoocsSearch } from "./services/moocs-search";
-import { WebSearchClient } from "./services/web-search-client";
-import { SearchOrchestrator } from "./services/search-orchestrator";
-import { ChatAgent } from "./services/chat-agent";
-import { SyllabusIndexService } from "./services/syllabus-index";
-import { SlidesIndexService } from "./services/slides-index";
+import { createAppServices } from "./services/app-services";
 import { ensureMcpConnected } from "./services/mcp-connection";
 import { settingsStore } from "./services/settings-store";
 import type { ChatTurn } from "../shared/types/chat";
 import type { McpStatus } from "../shared/types/settings";
 import type { ChatResponse } from "../shared/types/chat";
 
-const store = new InMemoryStore();
-const mcpClient = new McpClient();
-const moocsSearch = new MoocsSearch(mcpClient);
-const webClient = new WebSearchClient();
-const syllabusService = new SyllabusIndexService();
-const slidesService = new SlidesIndexService();
-const orchestrator = new SearchOrchestrator(moocsSearch, webClient, syllabusService, slidesService);
-const chatAgent = new ChatAgent(mcpClient, webClient, syllabusService, slidesService);
+const services = createAppServices();
+const { store, mcpClient, chatAgent } = services;
 let activeController: AbortController | null = null;
-
-syllabusService.load();
-slidesService.load();
 
 // ── Helper: broadcast MCP status to all windows ────
 
@@ -101,7 +85,6 @@ export function registerIpcHandlers(): void {
       if (mcpClient.getStatus() !== "connected" && settingsStore.hasMoocsCredentials()) {
         const connectResult = await ensureMcpConnected(
           mcpClient,
-          moocsSearch,
           broadcastMcpStatus,
           settings
         );
@@ -211,12 +194,7 @@ export function registerIpcHandlers(): void {
       return { success: false, error: "MOOCs 認証情報が設定されていません" };
     }
 
-    const result = await ensureMcpConnected(
-      mcpClient,
-      moocsSearch,
-      broadcastMcpStatus,
-      settings
-    );
+    const result = await ensureMcpConnected(mcpClient, broadcastMcpStatus, settings);
 
     return result.connected
       ? { success: true }
@@ -229,12 +207,7 @@ async function tryAutoConnectMcp(): Promise<void> {
   if (mcpClient.getStatus() === "connected") return;
 
   const settings = settingsStore.getRawSettings();
-  const result = await ensureMcpConnected(
-    mcpClient,
-    moocsSearch,
-    broadcastMcpStatus,
-    settings
-  );
+  const result = await ensureMcpConnected(mcpClient, broadcastMcpStatus, settings);
 
   if (result.connected) {
     console.log("[McpConnection] Auto-connected on startup");
@@ -244,10 +217,8 @@ async function tryAutoConnectMcp(): Promise<void> {
 }
 
 export const testExports = {
+  services,
   store,
   mcpClient,
-  moocsSearch,
-  webClient,
-  orchestrator,
   chatAgent,
 };

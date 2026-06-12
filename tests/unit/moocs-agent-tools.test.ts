@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import { executeAgentTool } from "../../src/main/services/moocs-agent-tools";
+import { executeAgentTool } from "../../src/main/services/moocs-tool-executor";
 import type { McpClient } from "../../src/main/services/mcp-client";
-import type { IWebSearchProvider } from "../../src/main/services/search-orchestrator";
+import type { IWebSearchProvider } from "../../src/main/services/web-search-types";
 
 function createMcpMock(overrides: Partial<McpClient> = {}): McpClient {
   return {

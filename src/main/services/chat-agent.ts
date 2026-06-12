@@ -11,10 +11,11 @@ import type {
   Citation,
 } from "../../shared/types/chat";
 import type { McpClient } from "./mcp-client";
-import type { IWebSearchProvider } from "./search-orchestrator";
+import type { IWebSearchProvider } from "./web-search-types";
 import type { SyllabusIndexService } from "./syllabus-index";
 import type { SlidesIndexService } from "./slides-index";
-import { MOOCS_AGENT_TOOLS, executeAgentTool } from "./moocs-agent-tools";
+import { MOOCS_AGENT_TOOLS } from "./moocs-tool-definitions";
+import { executeAgentTool } from "./moocs-tool-executor";
 import { prepareApiMessages, estimatePayloadChars } from "./agent-api-messages";
 
 const MAX_ITERATIONS = 10;

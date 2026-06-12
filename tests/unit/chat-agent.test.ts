@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { ChatAgent } from "../../src/main/services/chat-agent";
 import type { McpClient } from "../../src/main/services/mcp-client";
-import type { IWebSearchProvider } from "../../src/main/services/search-orchestrator";
+import type { IWebSearchProvider } from "../../src/main/services/web-search-types";
 import type { AppSettings } from "../../src/shared/types/settings";
 
 const settings: AppSettings = {

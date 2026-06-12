@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ensureMcpConnected } from "../../src/main/services/mcp-connection";
 import type { McpClient } from "../../src/main/services/mcp-client";
-import type { MoocsSearch } from "../../src/main/services/moocs-search";
 
 function createMocks() {
   const mcpClient = {
@@ -15,13 +14,9 @@ function createMocks() {
     connect: ReturnType<typeof vi.fn>;
   };
 
-  const moocsSearch = {
-    reset: vi.fn(),
-  } as unknown as MoocsSearch & { reset: ReturnType<typeof vi.fn> };
-
   const broadcastStatus = vi.fn();
 
-  return { mcpClient, moocsSearch, broadcastStatus };
+  return { mcpClient, broadcastStatus };
 }
 
 describe("ensureMcpConnected", () => {
@@ -30,10 +25,10 @@ describe("ensureMcpConnected", () => {
   });
 
   it("returns connected when already connected and healthy", async () => {
-    const { mcpClient, moocsSearch, broadcastStatus } = createMocks();
+    const { mcpClient, broadcastStatus } = createMocks();
     mcpClient.getStatus.mockReturnValue("connected");
 
-    const result = await ensureMcpConnected(mcpClient, moocsSearch, broadcastStatus, {
+    const result = await ensureMcpConnected(mcpClient, broadcastStatus, {
       moocsUsername: "user",
       moocsPassword: "pass",
     });
@@ -43,24 +38,23 @@ describe("ensureMcpConnected", () => {
   });
 
   it("connects with credentials when disconnected", async () => {
-    const { mcpClient, moocsSearch, broadcastStatus } = createMocks();
+    const { mcpClient, broadcastStatus } = createMocks();
 
-    const result = await ensureMcpConnected(mcpClient, moocsSearch, broadcastStatus, {
+    const result = await ensureMcpConnected(mcpClient, broadcastStatus, {
       moocsUsername: "user",
       moocsPassword: "pass",
     });
 
     expect(result.connected).toBe(true);
-    expect(moocsSearch.reset).toHaveBeenCalled();
     expect(mcpClient.connect).toHaveBeenCalledWith("user", "pass");
     expect(broadcastStatus).toHaveBeenCalledWith("connecting");
     expect(broadcastStatus).toHaveBeenCalledWith("connected");
   });
 
   it("returns error when credentials are missing", async () => {
-    const { mcpClient, moocsSearch, broadcastStatus } = createMocks();
+    const { mcpClient, broadcastStatus } = createMocks();
 
-    const result = await ensureMcpConnected(mcpClient, moocsSearch, broadcastStatus, {
+    const result = await ensureMcpConnected(mcpClient, broadcastStatus, {
       moocsUsername: "",
       moocsPassword: "",
     });
@@ -71,11 +65,11 @@ describe("ensureMcpConnected", () => {
   });
 
   it("reconnects when ping fails on connected client", async () => {
-    const { mcpClient, moocsSearch, broadcastStatus } = createMocks();
+    const { mcpClient, broadcastStatus } = createMocks();
     mcpClient.getStatus.mockReturnValue("connected");
     mcpClient.ping.mockResolvedValue(false);
 
-    const result = await ensureMcpConnected(mcpClient, moocsSearch, broadcastStatus, {
+    const result = await ensureMcpConnected(mcpClient, broadcastStatus, {
       moocsUsername: "user",
       moocsPassword: "pass",
     });
