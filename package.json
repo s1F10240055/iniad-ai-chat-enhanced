@@ -18,7 +18,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.config.mts tests/integration",
-    "build:syllabus-index": "node scripts/build-syllabus-index.mjs"
+    "postinstall": "patch-package",
+    "build:syllabus-index": "node scripts/build-syllabus-index.mjs",
+    "build:slides-index": "node scripts/build-slides-index.mjs"
   },
   "keywords": [],
   "author": {
@@ -54,6 +56,7 @@
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-react": "^7.37.2",
     "eslint-plugin-react-hooks": "^7.1.1",
+    "patch-package": "^8.0.1",
     "playwright": "^1.59.1",
     "prettier": "^3.5.3",
     "style-loader": "^4.0.0",

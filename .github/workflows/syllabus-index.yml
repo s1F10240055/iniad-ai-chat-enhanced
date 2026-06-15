@@ -1,0 +1,63 @@
+name: Build Syllabus Index
+
+on:
+  workflow_dispatch:
+    inputs:
+      academic_year:
+        description: "開講年度"
+        required: false
+        default: ""
+  schedule:
+    - cron: "0 3 1 * *" # 毎月1日 03:00 UTC (12:00 JST)
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build syllabus index
+        env:
+          INIAD_API_KEY: ${{ secrets.INIAD_API_KEY }}
+          SYLLABUS_COURSE_NAMES: ${{ secrets.SYLLABUS_COURSE_NAMES }}
+          SYLLABUS_ACADEMIC_YEAR: ${{ github.event.inputs.academic_year }}
+        run: npm run build:syllabus-index
+
+      - name: Check for changes
+        id: changes
+        run: |
+          # generatedAt タイムスタンプの変動で無意味コミットされるのを防ぐため courses のみ比較
+          git show HEAD:data/syllabus-index.json | jq -S '.courses' > /tmp/old.json
+          jq -S '.courses' data/syllabus-index.json > /tmp/new.json
+          if diff -q /tmp/old.json /tmp/new.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and push
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/syllabus-index.json
+          git commit -m "chore: update syllabus index [skip ci]"
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"

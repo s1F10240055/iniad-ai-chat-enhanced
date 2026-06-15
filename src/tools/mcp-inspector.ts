@@ -10,7 +10,7 @@
 
 import * as readline from "readline";
 import { McpClient } from "../main/services/mcp-client";
-import { MoocsSearch } from "../main/services/moocs-search";
+import { MoocsPageReader } from "../main/services/moocs-page-reader";
 
 const username = process.env.INIAD_USERNAME;
 const password = process.env.INIAD_PASSWORD;
@@ -21,7 +21,7 @@ if (!username || !password) {
 }
 
 const client = new McpClient();
-const search = new MoocsSearch(client);
+const pageReader = new MoocsPageReader(client);
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -59,36 +59,44 @@ async function cmdDisconnect() {
   logOk(`Disconnected (status: ${client.getStatus()})`);
 }
 
-async function cmdSearch(query: string) {
-  if (!query) {
-    logError("Usage: search <query>");
+async function cmdNavigate(url: string) {
+  if (!url) {
+    logError("Usage: navigate <url>");
     return;
   }
-  console.log(`\n⟳ Searching: "${query}"...`);
-  const result = await search.searchMoocs(query);
-  if (result.success) {
-    log(`Search Results (${result.results.length} items)`, result.results);
-  } else {
-    logError(`Search failed: ${result.error}`);
+  if (!url.startsWith("https://moocs.iniad.org/")) {
+    logError("URL must be a moocs.iniad.org URL");
+    return;
   }
+  console.log(`\n⟳ Navigating to: ${url}...`);
+  await client.navigateTo(url);
+  logOk(`Navigated to ${url}`);
 }
 
-async function cmdCache() {
-  console.log("\n⟳ Running cache cleanup...");
-  search.cleanupCache();
-  logOk("Cache cleanup completed");
+async function cmdRead(url: string) {
+  if (!url) {
+    logError("Usage: read <url>");
+    return;
+  }
+  if (!url.startsWith("https://moocs.iniad.org/")) {
+    logError("URL must be a moocs.iniad.org URL");
+    return;
+  }
+  console.log(`\n⟳ Reading: ${url}...`);
+  const result = await pageReader.readPage(url);
+  log("Page Content", { content: result.content, citations: result.citations });
 }
 
 function cmdHelp() {
   console.log(`
 Available commands:
-  connect        Connect to MCP server
-  disconnect     Disconnect from MCP server
-  status         Show connection status
-  search <q>     Search MOOCs content
-  cache          Run cache cleanup
-  help           Show this help
-  quit / exit    Exit the inspector
+  connect            Connect to MCP server
+  disconnect         Disconnect from MCP server
+  status             Show connection status
+  navigate <url>     Navigate to a MOOCs URL
+  read <url>         Read MOOCs page content (slide or HTML)
+  help               Show this help
+  quit / exit        Exit the inspector
 `);
 }
 
@@ -124,11 +132,11 @@ async function runREPL() {
         case "status":
           await cmdStatus();
           break;
-        case "search":
-          await cmdSearch(args.join(" "));
+        case "navigate":
+          await cmdNavigate(args.join(" "));
           break;
-        case "cache":
-          await cmdCache();
+        case "read":
+          await cmdRead(args.join(" "));
           break;
         case "help":
           cmdHelp();

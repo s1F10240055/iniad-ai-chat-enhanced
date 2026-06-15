@@ -1,0 +1,382 @@
+diff --git a/node_modules/@rarandeyo/iniad-moocs-mcp/lib/index.js b/node_modules/@rarandeyo/iniad-moocs-mcp/lib/index.js
+index ac1ec25..7f48c85 100644
+--- a/node_modules/@rarandeyo/iniad-moocs-mcp/lib/index.js
++++ b/node_modules/@rarandeyo/iniad-moocs-mcp/lib/index.js
+@@ -30,6 +30,9 @@ const listSlides_1 = __importDefault(require("./tools/listSlides"));
+ const listCourses_1 = __importDefault(require("./tools/listCourses"));
+ const submitAssignment_1 = __importDefault(require("./tools/submitAssignment"));
+ const handleDialog_1 = __importDefault(require("./tools/handleDialog"));
++const googleLogin_1 = __importDefault(require("./tools/googleLogin"));
++const expandSlideTab_1 = __importDefault(require("./tools/expandSlideTab"));
++const extractGoogleSlideText_1 = __importDefault(require("./tools/extractGoogleSlideText"));
+ const console_1 = require("./resources/console");
+ const snapshotTools = [
+     ...common_1.default,
+@@ -37,6 +40,9 @@ const snapshotTools = [
+     ...snapshot_1.default,
+     ...(0, tabs_1.default)(true),
+     ...login_1.default,
++    ...googleLogin_1.default,
++    ...expandSlideTab_1.default,
++    ...extractGoogleSlideText_1.default,
+     ...listLectures_1.default,
+     ...listSlides_1.default,
+     ...listCourses_1.default,
+@@ -48,6 +54,9 @@ const screenshotTools = [
+     ...(0, navigate_1.default)(false),
+     ...(0, tabs_1.default)(false),
+     ...login_1.default,
++    ...googleLogin_1.default,
++    ...expandSlideTab_1.default,
++    ...extractGoogleSlideText_1.default,
+     ...listLectures_1.default,
+     ...listSlides_1.default,
+     ...listCourses_1.default,
+diff --git a/node_modules/@rarandeyo/iniad-moocs-mcp/lib/tools/expandSlideTab.js b/node_modules/@rarandeyo/iniad-moocs-mcp/lib/tools/expandSlideTab.js
+new file mode 100644
+index 0000000..d388bad
+--- /dev/null
++++ b/node_modules/@rarandeyo/iniad-moocs-mcp/lib/tools/expandSlideTab.js
+@@ -0,0 +1,36 @@
++"use strict";
++Object.defineProperty(exports, "__esModule", { value: true });
++const zod_1 = require("zod");
++const zod_to_json_schema_1 = require("zod-to-json-schema");
++const ExpandSlideInputSchema = zod_1.z.object({});
++const expandSlideTabTool = {
++    schema: {
++        name: 'expandSlideTab',
++        description: 'On a MOOCs slide page, expands the スライド tab and waits for iframe content to load.',
++        inputSchema: (0, zod_to_json_schema_1.zodToJsonSchema)(ExpandSlideInputSchema),
++    },
++    capability: 'core',
++    async handle(context) {
++        try {
++            const tab = await context.ensureTab();
++            const page = tab.page;
++            const slideTab = page.locator('a').filter({ hasText: 'スライド' });
++            if (await slideTab.isVisible({ timeout: 3000 }).catch(() => false)) {
++                await slideTab.first().click();
++                await page.waitForSelector('iframe[src*="docs.google.com/presentation"]', { timeout: 15000 }).catch(() => {});
++                await page.waitForTimeout(2000);
++                const iframeSrc = await page.locator('iframe[src*="docs.google.com/presentation"]').first().getAttribute('src').catch(() => null);
++                return { content: [{ type: 'text', text: JSON.stringify({ status: 'expanded', iframeSrc }) }] };
++            }
++            return { content: [{ type: 'text', text: 'Slide tab not found; page may not be a slide page.' }] };
++        }
++        catch (error) {
++            const errorMessage = error instanceof Error ? error.message : String(error);
++            return {
++                content: [{ type: 'text', text: `expandSlideTab failed: ${errorMessage}` }],
++                isError: true,
++            };
++        }
++    },
++};
++exports.default = [expandSlideTabTool];
+diff --git a/node_modules/@rarandeyo/iniad-moocs-mcp/lib/tools/extractGoogleSlideText.js b/node_modules/@rarandeyo/iniad-moocs-mcp/lib/tools/extractGoogleSlideText.js
+new file mode 100644
+index 0000000..95751f1
+--- /dev/null
++++ b/node_modules/@rarandeyo/iniad-moocs-mcp/lib/tools/extractGoogleSlideText.js
+@@ -0,0 +1,227 @@
++"use strict";
++Object.defineProperty(exports, "__esModule", { value: true });
++const zod_1 = require("zod");
++const zod_to_json_schema_1 = require("zod-to-json-schema");
++
++const LOGIN_MARKERS = [
++  "Google アカウントにログイン",
++  "Sign in",
++  "accounts.google.com",
++];
++
++function parsePresentationId(url) {
++  const match = url.match(/\/presentation\/d\/(?:e\/)?([^/]+)/);
++  return match ? match[1] : null;
++}
++
++function toPubUrl(presentationId, embedUrl) {
++  const isPublished = embedUrl.includes("/d/e/") || presentationId.startsWith("2PACX");
++  if (isPublished) {
++    return `https://docs.google.com/presentation/d/e/${presentationId}/pub?start=false&loop=false&delayms=3000`;
++  }
++  return `https://docs.google.com/presentation/d/${presentationId}/pub?start=false&loop=false&delayms=3000`;
++}
++
++function isLoginWall(text) {
++  return LOGIN_MARKERS.some((m) => text.includes(m));
++}
++
++/** ブラウザ内で実行: 現在スライドの aria-label 本文を収集 */
++function extractSlideLabelsInBrowser() {
++  const NOISE = [
++    /^Shift[+＋]/,
++    /^⌘/,
++    /^Ctrl[+＋]/,
++    /^Alt[+＋]/,
++    /^[A-Z]$/,
++    /^Copyright ©/i,
++    /^From: https?:\/\//i,
++    /C:\\Users\\/i,
++    /\.bmp$/i,
++  ];
++
++  const isNoise = (label) => {
++    const t = label.trim();
++    if (t.length < 6) return true;
++    return NOISE.some((p) => p.test(t));
++  };
++
++  const slideInfo =
++    document.querySelector('[aria-label^="スライド"]')?.getAttribute("aria-label") || "";
++
++  const gLabels = Array.from(document.querySelectorAll("g[aria-label]"))
++    .map((e) => (e.getAttribute("aria-label") || "").replace(/\u000b/g, "\n").trim())
++    .filter((l) => !isNoise(l));
++
++  return {
++    slideInfo,
++    labels: [...new Set(gLabels)],
++  };
++}
++
++const extractGoogleSlideTextTool = {
++  schema: {
++    name: "extractGoogleSlideText",
++    description:
++      "Extracts text from Google Slides embedded on the current MOOCs slide page via aria-labels in the published viewer.",
++    inputSchema: (0, zod_to_json_schema_1.zodToJsonSchema)(zod_1.z.object({})),
++  },
++  capability: "core",
++  async handle(context) {
++    try {
++      const tab = await context.ensureTab();
++      const page = tab.page;
++      const moocsUrl = page.url();
++
++      const iframeLocator = page.locator('iframe[src*="docs.google.com/presentation"]');
++      const iframeCount = await iframeLocator.count();
++      if (iframeCount === 0) {
++        return {
++          content: [
++            {
++              type: "text",
++              text: JSON.stringify({
++                error: "no_google_slides_iframe",
++                moocsUrl,
++                hint: "Call expandSlideTab on a MOOCs slide page first.",
++              }),
++            },
++          ],
++          isError: true,
++        };
++      }
++
++      const src = await iframeLocator.first().getAttribute("src");
++      if (!src) {
++        return {
++          content: [{ type: "text", text: JSON.stringify({ error: "iframe_src_missing", moocsUrl }) }],
++          isError: true,
++        };
++      }
++
++      const embedUrl = new URL(src, moocsUrl).href;
++      const presentationId = parsePresentationId(embedUrl);
++      if (!presentationId) {
++        return {
++          content: [
++            { type: "text", text: JSON.stringify({ error: "presentation_id_not_found", embedUrl, moocsUrl }) },
++          ],
++          isError: true,
++        };
++      }
++
++      const pubUrl = toPubUrl(presentationId, embedUrl);
++      const browserContext = page.context();
++      const slidePage = await browserContext.newPage();
++
++      try {
++        await slidePage.goto(pubUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
++        await slidePage.waitForSelector('[aria-label^="スライド"]', { timeout: 20_000 }).catch(() => {});
++        await slidePage.waitForTimeout(2000);
++
++        const probe = await slidePage.evaluate(extractSlideLabelsInBrowser);
++        const totalMatch = probe.slideInfo.match(/スライド \d+\/(\d+)/);
++        const totalSlides = totalMatch ? Math.min(parseInt(totalMatch[1], 10), 30) : 15;
++
++        const allSlides = [];
++        const seenKeys = new Set();
++
++        for (let i = 0; i < totalSlides; i++) {
++          const current = await slidePage.evaluate(extractSlideLabelsInBrowser);
++          const key = current.slideInfo || current.labels.join("|");
++          if (!seenKeys.has(key)) {
++            seenKeys.add(key);
++            if (current.labels.length > 0 || current.slideInfo) {
++              allSlides.push({
++                heading: current.slideInfo.replace(/^スライド \d+\/\d+:\s*/, ""),
++                labels: current.labels,
++              });
++            }
++          }
++          await slidePage.keyboard.press("ArrowRight");
++          await slidePage.waitForTimeout(600);
++        }
++
++        const textParts = [];
++        for (const slide of allSlides) {
++          const body = slide.labels.join("\n").trim();
++          if (!body) continue;
++          const header = slide.heading ? `## ${slide.heading}` : "";
++          textParts.push(header ? `${header}\n${body}` : body);
++        }
++        let combined = textParts.join("\n\n---\n\n").trim();
++        const MAX_COMBINED_CHARS = 6_000;
++        if (combined.length > MAX_COMBINED_CHARS) {
++          combined = combined.slice(0, MAX_COMBINED_CHARS) + "\n...(truncated)";
++        }
++
++        // ログイン壁ではスライド本文(aria-label)が空になることがあるため、
++        // ページ本文も含めてログインマーカーを検出する（empty 判定より前で）
++        const bodyText = await slidePage
++          .evaluate(() => document.body?.innerText || "")
++          .catch(() => "");
++        if (isLoginWall(combined) || isLoginWall(bodyText)) {
++          return {
++            content: [
++              {
++                type: "text",
++                text: JSON.stringify({
++                  error: "google_login_required",
++                  moocsUrl,
++                  presentationId,
++                  pubUrl,
++                }),
++              },
++            ],
++            isError: true,
++          };
++        }
++
++        if (!combined || combined.length < 40) {
++          return {
++            content: [
++              {
++                type: "text",
++                text: JSON.stringify({
++                  error: "empty_slide_text",
++                  moocsUrl,
++                  presentationId,
++                  pubUrl,
++                  slideCount: allSlides.length,
++                  charCount: combined.length,
++                }),
++              },
++            ],
++            isError: true,
++          };
++        }
++
++        return {
++          content: [
++            {
++              type: "text",
++              text: JSON.stringify({
++                moocsUrl,
++                presentationId,
++                pubUrl,
++                slideCount: allSlides.length,
++                charCount: combined.length,
++                text: combined,
++              }),
++            },
++          ],
++        };
++      } finally {
++        await slidePage.close().catch(() => {});
++      }
++    } catch (error) {
++      const errorMessage = error instanceof Error ? error.message : String(error);
++      return {
++        content: [{ type: "text", text: `extractGoogleSlideText failed: ${errorMessage}` }],
++        isError: true,
++      };
++    }
++  },
++};
++
++exports.default = [extractGoogleSlideTextTool];
+diff --git a/node_modules/@rarandeyo/iniad-moocs-mcp/lib/tools/googleLogin.js b/node_modules/@rarandeyo/iniad-moocs-mcp/lib/tools/googleLogin.js
+new file mode 100644
+index 0000000..f98bcc6
+--- /dev/null
++++ b/node_modules/@rarandeyo/iniad-moocs-mcp/lib/tools/googleLogin.js
+@@ -0,0 +1,67 @@
++"use strict";
++Object.defineProperty(exports, "__esModule", { value: true });
++const zod_1 = require("zod");
++const zod_to_json_schema_1 = require("zod-to-json-schema");
++const LoginInputSchema = zod_1.z.object({});
++function toGoogleEmail(username) {
++    const trimmed = (username || '').trim();
++    if (!trimmed)
++        return '';
++    return trimmed.includes('@') ? trimmed : `${trimmed}@iniad.org`;
++}
++const googleLoginTool = {
++    schema: {
++        name: 'loginToGoogleWithIniadAccount',
++        description: 'Logs in to Google with INIAD account credentials (INIAD_USERNAME as @iniad.org email, INIAD_PASSWORD). Skips if already logged in.',
++        inputSchema: (0, zod_to_json_schema_1.zodToJsonSchema)(LoginInputSchema),
++    },
++    capability: 'core',
++    async handle(context) {
++        const username = process.env.INIAD_USERNAME;
++        const password = process.env.INIAD_PASSWORD;
++        if (!username || !password) {
++            return {
++                content: [{ type: 'text', text: 'Error: INIAD_USERNAME and INIAD_PASSWORD must be set.' }],
++                isError: true,
++            };
++        }
++        const email = toGoogleEmail(username);
++        try {
++            const tab = await context.ensureTab();
++            const page = tab.page;
++            await page.goto('https://accounts.google.com/', { waitUntil: 'domcontentloaded' });
++            await page.waitForTimeout(1000);
++            const url = page.url();
++            if (url.includes('myaccount.google.com') || url.includes('mail.google.com')) {
++                return { content: [{ type: 'text', text: 'Already logged in to Google.' }] };
++            }
++            const emailInput = page.locator('input[type="email"], input[name="identifier"]');
++            if (await emailInput.isVisible({ timeout: 5000 }).catch(() => false)) {
++                await emailInput.fill(email);
++                const nextBtn = page.locator('button:has-text("次へ"), button:has-text("Next"), #identifierNext');
++                await nextBtn.first().click();
++                await page.waitForTimeout(1500);
++            }
++            const passwordInput = page.locator('input[type="password"], input[name="Passwd"]');
++            await passwordInput.waitFor({ state: 'visible', timeout: 10000 });
++            await passwordInput.fill(password);
++            const loginBtn = page.locator('button:has-text("次へ"), button:has-text("Next"), #passwordNext');
++            await loginBtn.first().click();
++            await page.waitForURL(/myaccount\.google\.com|mail\.google\.com|google\.com\/account/, { timeout: 30000 }).catch(async () => {
++                const current = page.url();
++                if (current.includes('challenge') || current.includes('signin/v2/challenge')) {
++                    throw new Error('Google 2FA required. Log in manually in Playwright profile (see README).');
++                }
++            });
++            return { content: [{ type: 'text', text: `Google login succeeded for ${email}` }] };
++        }
++        catch (error) {
++            const errorMessage = error instanceof Error ? error.message : String(error);
++            return {
++                content: [{ type: 'text', text: `Google login failed: ${errorMessage}` }],
++                isError: true,
++            };
++        }
++    },
++};
++exports.default = [googleLoginTool];

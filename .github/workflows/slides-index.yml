@@ -1,0 +1,43 @@
+name: Update slides index
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 1 * *"
+
+jobs:
+  build-slides-index:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build slides index
+        run: npm run build:slides-index
+
+      - name: Commit if entries changed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # generatedAt タイムスタンプの変動で無意味コミットされるのを防ぐため entries のみ比較
+          git show HEAD:data/slides-index.json | jq -S '.entries' > /tmp/old.json
+          jq -S '.entries' data/slides-index.json > /tmp/new.json
+          if diff -q /tmp/old.json /tmp/new.json; then
+            echo "No changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/slides-index.json
+          git commit -m "chore: update slides index"
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"

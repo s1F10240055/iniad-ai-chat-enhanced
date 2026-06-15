@@ -190,6 +190,9 @@ try {
     'listSlideLinks',
     'browser_navigate',
     'browser_snapshot',
+    'loginToGoogleWithIniadAccount',
+    'expandSlideTab',
+    'extractGoogleSlideText',
   ];
   
   for (const expected of expectedTools) {

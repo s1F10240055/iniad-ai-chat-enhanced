@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "generatedAt": "2026-06-12T05:26:30.713Z",
+  "entries": [
+    {
+      "courseCode": "COS201",
+      "courseName": "プログラミング言語",
+      "lectureNum": "01",
+      "slideNum": "01",
+      "slideTitle": "1. C言語の光と影",
+      "moocsUrl": "https://moocs.iniad.org/courses/2026/COS201/01/01",
+      "presentationId": "2PACX-1vRzuOpQeCRv7W-1T90USzSHcqSTIe_4aanlc0Pwko5tDu89TD0NZ2OIq6PaZMvO4A",
+      "driveFileId": "1JfFBOjqA2wScJISn0LXb2FxoVFc8UsU2",
+      "text": "C言語は組込みシステムや科学技術計算、OSなどのシステムプログラミングで標準的な言語である。効率的なC言語プログラミングにはコンピュータの動作原理の理解が不可欠。変数はメモリ（RAM）上に番地付きで配置され、メモリ空間全体がアドレス空間を形成する。機械語では変数名ではなくアドレス番号でアクセスする。プログラムは機械語に変換されて実行され、機械語には変数の概念はなく、変数は人間がメモリ番地に付けた名前に過ぎない。",
+      "keywords": [
+        "C言語",
+        "メモリ",
+        "RAM",
+        "機械語",
+        "変数",
+        "アドレス"
+      ]
+    }
+  ]
+}

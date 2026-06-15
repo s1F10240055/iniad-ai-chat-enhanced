@@ -20,7 +20,14 @@ const COURSE_NAMES = (process.env.SYLLABUS_COURSE_NAMES || "").trim();
 const API_KEY = process.env.INIAD_API_KEY || "";
 const API_URL = process.env.INIAD_API_URL || "https://api.openai.iniad.org/api/v1";
 const MODEL = process.env.INIAD_MODEL || "gpt-4o-mini";
-const ACADEMIC_YEAR = process.env.SYLLABUS_ACADEMIC_YEAR || String(new Date().getFullYear());
+// 日本の年度（4月始まり）：1〜3月は前年。
+// 月次 cron は SYLLABUS_ACADEMIC_YEAR を渡さないため、既定をカレンダー年にすると
+// 1月以降に存在しない新暦年を取りに行き全件 partial/error になるのを防ぐ。
+function defaultAcademicYear() {
+  const now = new Date();
+  return String(now.getFullYear() - (now.getMonth() + 1 < 4 ? 1 : 0));
+}
+const ACADEMIC_YEAR = process.env.SYLLABUS_ACADEMIC_YEAR || defaultAcademicYear();
 const OUTPUT_PATH = process.env.SYLLABUS_OUTPUT_PATH || "data/syllabus-index.json";
 
 const SYLLABUS_BASE = "https://g-sys.toyo.ac.jp/syllabus";
@@ -55,9 +62,8 @@ function courseNames() {
 async function searchSyllabus(courseName) {
   const url = `${SYLLABUS_BASE}/result`;
   const params = new URLSearchParams({
-    nendo: ACADEMIC_YEAR,
-    gakubu: "情報連携学部",
-    kamoku: courseName,
+    year: ACADEMIC_YEAR,
+    course_name: courseName,
   });
 
   const res = await fetch(url, {
@@ -78,12 +84,24 @@ function extractDetailUrls(html) {
   const $ = cheerioLoad(html);
   const results = [];
 
-  $("a[href]").each((_, el) => {
-    const href = $(el).attr("href");
-    if (href && href.includes("/syllabus/html/gakugai/")) {
-      const full = new URL(href, `${SYLLABUS_BASE}/result`).href;
-      if (!results.some((r) => r.url === full)) {
-        results.push({ url: full, label: $(el).text().trim() });
+  // Search results use onclick="showSbs('2026','164723','','ja')" pattern
+  $("[onclick]").each((_, el) => {
+    const onclick = $(el).attr("onclick") || "";
+    const match = onclick.match(/showSbs\(['"](\d+)['"],\s*['"](\d+)['"]/);
+    if (match) {
+      const year = match[1];
+      const code = match[2];
+      const url = `${SYLLABUS_BASE}/html/gakugai/${year}/${year}_${code}.html`;
+      if (!results.some((r) => r.url === url)) {
+        // Extract course name from the 3rd td in the row (授業科目名 column)
+        const cells = $(el).closest("tr").find("td");
+        let courseLabel = "";
+        if (cells.length >= 3) {
+          courseLabel = cells.eq(2).text().trim().replace(/\s+/g, " ");
+          // Remove English name after Japanese name
+          courseLabel = courseLabel.split(/\s{2,}/)[0].trim();
+        }
+        results.push({ url, label: courseLabel || code });
       }
     }
   });
@@ -245,7 +263,10 @@ async function processCourse(courseName) {
     let matched;
     if (searchResults.length > 1) {
       const norm = normalizeName(courseName);
-      matched = searchResults.find((r) => normalizeName(r.label) === norm);
+      matched = searchResults.find((r) => {
+        const normLabel = normalizeName(r.label);
+        return normLabel === norm || normLabel.startsWith(norm) || norm.startsWith(normLabel);
+      });
       if (!matched) {
         console.warn(
           `  ⚠ Multiple results for "${courseName}" but no exact match: ${searchResults.map((r) => r.label).join(", ")}`
