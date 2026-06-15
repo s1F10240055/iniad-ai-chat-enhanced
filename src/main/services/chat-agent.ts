@@ -68,7 +68,6 @@ export class ChatAgent {
       throw new Error("API キーが設定されていません。設定画面から入力してください。");
     }
 
-    const mcpConnected = this.mcpClient.getStatus() === "connected";
     const syllabusHint = this.buildSyllabusHint(userText);
 
     const messages: AgentMessage[] = [
@@ -136,7 +135,7 @@ export class ChatAgent {
           const toolResult = await executeAgentTool(toolName, argsJson, {
             mcpClient: this.mcpClient,
             webClient: this.webClient,
-            mcpConnected,
+            mcpConnected: this.mcpClient.getStatus() === "connected",
             slidesIndex: this.slidesIndex,
             slideReadCache,
           });
@@ -233,6 +232,8 @@ export class ChatAgent {
         return (await response.json()) as ChatCompletionResponse;
       } catch (error) {
         lastError = error;
+        // ユーザーキャンセルは汎用 API 失敗にせず、キャンセル専用メッセージで即時再スロー
+        if (signal?.aborted) throw new Error("リクエストがキャンセルされました");
         const msg = error instanceof Error ? error.message : String(error);
         console.warn(`[Agent] API call attempt ${attempt}/${API_RETRY_COUNT} failed: ${msg}`);
         if (attempt < API_RETRY_COUNT && !signal?.aborted) {

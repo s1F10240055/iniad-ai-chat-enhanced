@@ -10,6 +10,20 @@ const MAX_SNAPSHOT_CHARS = 3_000;
 /** LLM に渡さない危険な MCP ツール */
 const BLOCKED_MCP_TOOLS = new Set(["submit_assignment", "browser_handle_dialog"]);
 
+/**
+ * moocs.iniad.org 上の HTTPS URL かを厳密に検証する。
+ * startsWith だと `https://moocs.iniad.org.evil.example/` のような
+ * ドメイン偽装を通してしまうため、URL パース結果の hostname で比較する。
+ */
+function isMoocsUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && parsed.hostname === "moocs.iniad.org";
+  } catch {
+    return false;
+  }
+}
+
 export interface ToolExecutionContext {
   mcpClient: McpClient;
   webClient: IWebSearchProvider;
@@ -54,7 +68,7 @@ export async function executeAgentTool(
 
       case "moocs_navigate": {
         const url = String(args.url ?? "");
-        if (!url.startsWith("https://moocs.iniad.org/")) {
+        if (!isMoocsUrl(url)) {
           return { content: "Error: url must be a moocs.iniad.org URL", citations: [] };
         }
         return await runMoocsTool(ctx, async () => {
@@ -78,7 +92,7 @@ export async function executeAgentTool(
 
       case "moocs_read_slide": {
         const slideUrl = args.url ? String(args.url) : undefined;
-        if (slideUrl && !slideUrl.startsWith("https://moocs.iniad.org/")) {
+        if (slideUrl && !isMoocsUrl(slideUrl)) {
           return { content: "Error: url must be a moocs.iniad.org URL", citations: [] };
         }
         return await runMoocsTool(ctx, async () => pageReader.readPage(slideUrl));
@@ -129,7 +143,7 @@ export async function executeAgentTool(
         for (const r of result.results.slice(0, 5)) {
           citations.push({ title: r.title, url: r.url, snippet: r.snippet });
         }
-        return { content: lines.join("\n\n") || "No web results", citations };
+        return { content: truncate(lines.join("\n\n") || "No web results"), citations };
       }
 
       default:
@@ -148,7 +162,8 @@ async function runMoocsTool(
   ctx: ToolExecutionContext,
   fn: () => Promise<ToolExecutionResult>
 ): Promise<ToolExecutionResult> {
-  if (!ctx.mcpConnected || ctx.mcpClient.getStatus() !== "connected") {
+  // 都度ライブ状態を確認（チャット中の moocs_login 成功後など接続変化に追従）
+  if (ctx.mcpClient.getStatus() !== "connected") {
     return {
       content:
         "Error: MCP is not connected. Ask the user to configure MOOCs credentials and connect in Settings.",

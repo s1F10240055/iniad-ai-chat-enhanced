@@ -3,7 +3,8 @@ export { getMoocsPageKind, isGoogleSlidePage } from "./moocs-page-kind";
 
 /** クエリから講義回番号（01, 02, ...）を推定する */
 export function parseLectureOrdinal(query: string): string | null {
-  const q = query.toLowerCase();
+  // 全角数字（第１回 / １回目 など）を半角化してから判定
+  const q = query.normalize("NFKC").toLowerCase();
 
   if (/(初回|第1回|1回目|第一回)/.test(q)) return "01";
   if (/(第2回|2回目|第二回)/.test(q)) return "02";
@@ -20,5 +21,5 @@ export function parseLectureOrdinal(query: string): string | null {
 
 /** 初回・講義資料など、特定講義を指すクエリか */
 export function impliesLectureContent(query: string): boolean {
-  return /(初回|第\d+回|\d+回目|講義資料|スライド|まとめ)/.test(query);
+  return /(初回|第\d+回|\d+回目|講義資料|スライド|まとめ)/.test(query.normalize("NFKC"));
 }

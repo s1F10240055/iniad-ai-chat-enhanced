@@ -29,7 +29,7 @@ const webClient: IWebSearchProvider = {
 describe("executeAgentTool", () => {
   it("returns error when MCP is not connected", async () => {
     const result = await executeAgentTool("moocs_list_courses", "{}", {
-      mcpClient: createMcpMock(),
+      mcpClient: createMcpMock({ getStatus: vi.fn().mockReturnValue("disconnected") }),
       webClient,
       mcpConnected: false,
     });

@@ -13,6 +13,14 @@ describe("moocs-query", () => {
     it("maps 第2回 to 02", () => {
       expect(parseLectureOrdinal("第2回の要点")).toBe("02");
     });
+
+    it("maps full-width 第１回 to 01", () => {
+      expect(parseLectureOrdinal("第１回の要点")).toBe("01");
+    });
+
+    it("maps full-width １回目 to 01", () => {
+      expect(parseLectureOrdinal("課題の１回目を教えて")).toBe("01");
+    });
   });
 
   describe("impliesLectureContent", () => {
