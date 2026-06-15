@@ -39,7 +39,8 @@ export function filterSlideAriaLabels(labels: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const raw of labels) {
-    const label = raw.replace(/\u000b/g, "\n").trim();
+    // vertical tab (U+000B) を改行 (U+000A) へ置換。正規表現リテラルだと no-control-regex に引っかかるため String.fromCharCode を使用
+    const label = raw.split(String.fromCharCode(0x0b)).join(String.fromCharCode(0x0a)).trim();
     if (!isSlideAriaLabel(label)) continue;
     if (seen.has(label)) continue;
     seen.add(label);
