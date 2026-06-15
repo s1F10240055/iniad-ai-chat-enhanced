@@ -74,8 +74,7 @@ export const MOOCS_AGENT_TOOLS: ChatToolDefinition[] = [
     type: "function",
     function: {
       name: "moocs_expand_slide_tab",
-      description:
-        "スライドページで「スライド」タブを開く。通常は moocs_read_slide を使えば不要。",
+      description: "スライドページで「スライド」タブを開く。通常は moocs_read_slide を使えば不要。",
       parameters: { type: "object", properties: {}, additionalProperties: false },
     },
   },
@@ -101,7 +100,8 @@ export const MOOCS_AGENT_TOOLS: ChatToolDefinition[] = [
     type: "function",
     function: {
       name: "web_search",
-      description: "MOOCs 外の補足情報を Web 検索する。INIAD 講義内容の回答には MOOCs ツールを優先すること。",
+      description:
+        "MOOCs 外の補足情報を Web 検索する。INIAD 講義内容の回答には MOOCs ツールを優先すること。",
       parameters: {
         type: "object",
         properties: {

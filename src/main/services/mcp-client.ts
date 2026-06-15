@@ -147,11 +147,7 @@ export class McpClient {
   }
 
   async loginToMoocs(): Promise<unknown> {
-    return this.callToolSafe(
-      "loginToIniadMoocsWithIniadAccount",
-      undefined,
-      LOGIN_TOOL_TIMEOUT_MS
-    );
+    return this.callToolSafe("loginToIniadMoocsWithIniadAccount", undefined, LOGIN_TOOL_TIMEOUT_MS);
   }
 
   async fetchCourses(): Promise<CourseSummary[]> {

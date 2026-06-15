@@ -10,9 +10,7 @@ const OMITTED_TOOL_BODY = "[以前のツール結果は省略。直近の調査�
  * 古い tool メッセージの本文だけ差し替え（assistant/tool_calls の対応は維持）。
  */
 export function prepareApiMessages(messages: AgentMessage[]): AgentMessage[] {
-  const toolIndices = messages
-    .map((m, i) => (m.role === "tool" ? i : -1))
-    .filter((i) => i >= 0);
+  const toolIndices = messages.map((m, i) => (m.role === "tool" ? i : -1)).filter((i) => i >= 0);
 
   if (toolIndices.length <= KEEP_RECENT_TOOL_RESULTS) {
     return messages;

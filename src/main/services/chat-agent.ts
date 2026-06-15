@@ -212,7 +212,7 @@ export class ChatAgent {
         const combinedSignal =
           signal && typeof AbortSignal.any === "function"
             ? AbortSignal.any([signal, timeoutSignal])
-            : signal ?? timeoutSignal;
+            : (signal ?? timeoutSignal);
 
         const response = await fetch(apiUrl, {
           method: "POST",

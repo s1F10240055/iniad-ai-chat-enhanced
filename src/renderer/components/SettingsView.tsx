@@ -485,8 +485,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
             INIAD MOOCs 認証
           </h3>
           <p className="settings-section-description">
-            学籍番号とパスワードを入力後、「接続テスト」を押してください。
-            認証情報を使って MCP サーバー（Playwright）経由で MOOCs に接続します。起動時・チャット送信時にも自動接続を試みます。
+            学籍番号とパスワードを入力後、「接続テスト」を押してください。 認証情報を使って MCP
+            サーバー（Playwright）経由で MOOCs
+            に接続します。起動時・チャット送信時にも自動接続を試みます。
           </p>
 
           <div className="settings-field">

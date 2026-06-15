@@ -46,11 +46,7 @@ export async function executeAgentTool(
   }
 
   const citations: Citation[] = [];
-  const pageReader = new MoocsPageReader(
-    ctx.mcpClient,
-    ctx.slidesIndex,
-    ctx.slideReadCache
-  );
+  const pageReader = new MoocsPageReader(ctx.mcpClient, ctx.slidesIndex, ctx.slideReadCache);
 
   try {
     switch (toolName) {

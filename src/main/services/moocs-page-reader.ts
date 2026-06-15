@@ -69,9 +69,7 @@ export class MoocsPageReader {
     if (moocsUrl && this.slidesIndex?.isLoaded()) {
       const indexed = this.slidesIndex.getTextByMoocsUrl(moocsUrl);
       if (indexed) {
-        const content = truncate(
-          `MOOCs URL: ${moocsUrl}\nSource: slides-index\n\n${indexed}`
-        );
+        const content = truncate(`MOOCs URL: ${moocsUrl}\nSource: slides-index\n\n${indexed}`);
         this.slideReadCache?.set(moocsUrl, content);
         return { content, citations };
       }

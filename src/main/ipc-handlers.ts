@@ -83,11 +83,7 @@ export function registerIpcHandlers(): void {
 
       // MOOCs 検索のため、未接続時は認証情報があれば自動接続を試みる
       if (mcpClient.getStatus() !== "connected" && settingsStore.hasMoocsCredentials()) {
-        const connectResult = await ensureMcpConnected(
-          mcpClient,
-          broadcastMcpStatus,
-          settings
-        );
+        const connectResult = await ensureMcpConnected(mcpClient, broadcastMcpStatus, settings);
         if (!connectResult.connected) {
           console.warn("[chat:send] MCP auto-connect failed:", connectResult.error);
         }
