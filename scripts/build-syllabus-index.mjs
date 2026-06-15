@@ -20,7 +20,14 @@ const COURSE_NAMES = (process.env.SYLLABUS_COURSE_NAMES || "").trim();
 const API_KEY = process.env.INIAD_API_KEY || "";
 const API_URL = process.env.INIAD_API_URL || "https://api.openai.iniad.org/api/v1";
 const MODEL = process.env.INIAD_MODEL || "gpt-4o-mini";
-const ACADEMIC_YEAR = process.env.SYLLABUS_ACADEMIC_YEAR || String(new Date().getFullYear());
+// 日本の年度（4月始まり）：1〜3月は前年。
+// 月次 cron は SYLLABUS_ACADEMIC_YEAR を渡さないため、既定をカレンダー年にすると
+// 1月以降に存在しない新暦年を取りに行き全件 partial/error になるのを防ぐ。
+function defaultAcademicYear() {
+  const now = new Date();
+  return String(now.getFullYear() - (now.getMonth() + 1 < 4 ? 1 : 0));
+}
+const ACADEMIC_YEAR = process.env.SYLLABUS_ACADEMIC_YEAR || defaultAcademicYear();
 const OUTPUT_PATH = process.env.SYLLABUS_OUTPUT_PATH || "data/syllabus-index.json";
 
 const SYLLABUS_BASE = "https://g-sys.toyo.ac.jp/syllabus";
