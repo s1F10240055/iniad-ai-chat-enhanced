@@ -83,7 +83,8 @@ export class MoocsPageReader {
     const parsed = parseGoogleSlideExtract(rawText);
     const resolvedUrl = moocsUrl ?? parsed?.moocsUrl;
 
-    if (resolvedUrl) {
+    // L61 で moocsUrl の citation は積み済み。抽出で新たに URL が判明した場合のみ追加（重複回避）
+    if (resolvedUrl && resolvedUrl !== moocsUrl) {
       citations.push({ title: "MOOCs スライド", url: resolvedUrl });
     }
 

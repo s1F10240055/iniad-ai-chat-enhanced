@@ -68,10 +68,8 @@ export class SyllabusIndexService {
 
     matches.sort((a, b) => b.confidence - a.confidence);
     const top = matches.slice(0, 3);
-    console.log(
-      `[SyllabusIndex] matchCourses("${query}") → tokens=${JSON.stringify(tokens)}, ` +
-        `matches=${top.map((m) => `${m.courseName}(${(m.confidence * 100).toFixed(0)}%)`).join(", ")}`
-    );
+    // ユーザー入力（query / tokens）は個人情報を含み得るため件数のみログ出力
+    console.log(`[SyllabusIndex] matchCourses: ${tokens.length} tokens → ${top.length} matches`);
     return top;
   }
 

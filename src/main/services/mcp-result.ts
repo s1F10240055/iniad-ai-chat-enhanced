@@ -2,10 +2,12 @@ import type { Citation } from "../../shared/types/chat";
 import { collectCitationsFromText } from "./moocs-citations";
 
 export const MAX_TOOL_RESULT_CHARS = 4_000;
+const TRUNCATE_SUFFIX = "\n...(truncated)";
 
 export function truncate(text: string, maxChars = MAX_TOOL_RESULT_CHARS): string {
   if (text.length <= maxChars) return text;
-  return text.slice(0, maxChars) + "\n...(truncated)";
+  // サフィックス長を差し引いて切り詰め、戻り値が maxChars を超えないようにする
+  return text.slice(0, Math.max(0, maxChars - TRUNCATE_SUFFIX.length)) + TRUNCATE_SUFFIX;
 }
 
 export function mcpResultToText(result: unknown): string {

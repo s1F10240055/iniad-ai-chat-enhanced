@@ -62,29 +62,33 @@ export class SlidesIndexService {
     for (const entry of this.index.entries) {
       if (courseCode && entry.courseCode !== courseCode) continue;
 
-      if (ordinal && entry.lectureNum === ordinal) {
-        const key = entry.moocsUrl;
-        if (!seen.has(key)) {
-          seen.add(key);
-          matches.push({
-            courseCode: entry.courseCode,
-            courseName: entry.courseName,
-            slideTitle: `${entry.lectureNum}回: ${entry.slideTitle}`,
-            moocsUrl: entry.moocsUrl,
-            text: entry.text,
-            confidence: 0.88,
-          });
-        }
-        continue;
-      }
+      const tokenMatch = tokens.length > 0 ? this.matchEntry(entry, tokens) : null;
+      // 講義回一致は「加点ボーナス」として扱い、ショートサーキットしない。
+      // そうしないと「COS201 第1回」が別科目の第1回にも同点で広がってしまう。
+      const lectureMatched = !!ordinal && entry.lectureNum === ordinal;
 
-      if (tokens.length === 0) continue;
+      if (!tokenMatch && !lectureMatched) continue;
 
-      const result = this.matchEntry(entry, tokens);
-      if (result && !seen.has(result.moocsUrl)) {
-        seen.add(result.moocsUrl);
-        matches.push(result);
+      const key = entry.moocsUrl;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      let confidence = tokenMatch?.confidence ?? 0;
+      if (lectureMatched) {
+        confidence = tokenMatch ? Math.min(1, confidence + 0.15) : 0.7;
       }
+      if (confidence <= 0) continue;
+
+      matches.push({
+        courseCode: entry.courseCode,
+        courseName: entry.courseName,
+        slideTitle: lectureMatched
+          ? `${entry.lectureNum}回: ${entry.slideTitle}`
+          : entry.slideTitle,
+        moocsUrl: entry.moocsUrl,
+        text: entry.text,
+        confidence,
+      });
     }
 
     if (matches.length === 0 && impliesLectureContent(query) && !courseCode) {
@@ -109,6 +113,7 @@ export class SlidesIndexService {
 
   private matchEntry(entry: SlideIndexEntry, tokens: string[]): SlideMatch | null {
     const searchable = [
+      entry.courseCode,
       entry.courseName,
       entry.slideTitle,
       entry.text,
