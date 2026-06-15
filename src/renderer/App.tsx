@@ -191,7 +191,7 @@ const App: React.FC = () => {
       <div className="views-container">
         <div className={`view-layer ${isChat ? "view-active" : "view-hidden"}`}>
           <main className="app-main">
-            <ChatView messages={messages} />
+            <ChatView messages={messages} isLoading={isLoading} />
           </main>
           <ChatInput onSend={handleSend} disabled={isLoading} />
         </div>
