@@ -76,10 +76,10 @@ index 0000000..d388bad
 +exports.default = [expandSlideTabTool];
 diff --git a/node_modules/@rarandeyo/iniad-moocs-mcp/lib/tools/extractGoogleSlideText.js b/node_modules/@rarandeyo/iniad-moocs-mcp/lib/tools/extractGoogleSlideText.js
 new file mode 100644
-index 0000000..99dafda
+index 0000000..95751f1
 --- /dev/null
 +++ b/node_modules/@rarandeyo/iniad-moocs-mcp/lib/tools/extractGoogleSlideText.js
-@@ -0,0 +1,222 @@
+@@ -0,0 +1,227 @@
 +"use strict";
 +Object.defineProperty(exports, "__esModule", { value: true });
 +const zod_1 = require("zod");
@@ -237,6 +237,28 @@ index 0000000..99dafda
 +          combined = combined.slice(0, MAX_COMBINED_CHARS) + "\n...(truncated)";
 +        }
 +
++        // ログイン壁ではスライド本文(aria-label)が空になることがあるため、
++        // ページ本文も含めてログインマーカーを検出する（empty 判定より前で）
++        const bodyText = await slidePage
++          .evaluate(() => document.body?.innerText || "")
++          .catch(() => "");
++        if (isLoginWall(combined) || isLoginWall(bodyText)) {
++          return {
++            content: [
++              {
++                type: "text",
++                text: JSON.stringify({
++                  error: "google_login_required",
++                  moocsUrl,
++                  presentationId,
++                  pubUrl,
++                }),
++              },
++            ],
++            isError: true,
++          };
++        }
++
 +        if (!combined || combined.length < 40) {
 +          return {
 +            content: [
@@ -249,23 +271,6 @@ index 0000000..99dafda
 +                  pubUrl,
 +                  slideCount: allSlides.length,
 +                  charCount: combined.length,
-+                }),
-+              },
-+            ],
-+            isError: true,
-+          };
-+        }
-+
-+        if (isLoginWall(combined)) {
-+          return {
-+            content: [
-+              {
-+                type: "text",
-+                text: JSON.stringify({
-+                  error: "google_login_required",
-+                  moocsUrl,
-+                  presentationId,
-+                  pubUrl,
 +                }),
 +              },
 +            ],
@@ -304,19 +309,20 @@ index 0000000..99dafda
 +exports.default = [extractGoogleSlideTextTool];
 diff --git a/node_modules/@rarandeyo/iniad-moocs-mcp/lib/tools/googleLogin.js b/node_modules/@rarandeyo/iniad-moocs-mcp/lib/tools/googleLogin.js
 new file mode 100644
-index 0000000..cbfb57d
+index 0000000..f98bcc6
 --- /dev/null
 +++ b/node_modules/@rarandeyo/iniad-moocs-mcp/lib/tools/googleLogin.js
-@@ -0,0 +1,66 @@
+@@ -0,0 +1,67 @@
 +"use strict";
 +Object.defineProperty(exports, "__esModule", { value: true });
 +const zod_1 = require("zod");
 +const zod_to_json_schema_1 = require("zod-to-json-schema");
 +const LoginInputSchema = zod_1.z.object({});
 +function toGoogleEmail(username) {
-+    if (!username)
++    const trimmed = (username || '').trim();
++    if (!trimmed)
 +        return '';
-+    return username.includes('@') ? username : `${username}@iniad.org`;
++    return trimmed.includes('@') ? trimmed : `${trimmed}@iniad.org`;
 +}
 +const googleLoginTool = {
 +    schema: {
