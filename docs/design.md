@@ -567,7 +567,7 @@ export class SettingsStore {
   }
 
   /** 設定取得（機密値は空文字列・設定��みフラグで示す） */
-  get(): PublicAppSettings {
+  getSettings(): PublicAppSettings {
     return {
       apiKey: "",
       baseURL: this.settings.baseURL,

@@ -77,10 +77,7 @@ describe("SettingsStore", () => {
     // 旧実装ではマスク値 "••••••••" が保存され���本物の値が壊れていた。
     // 新仕様では空文字列が返るため、updateSettings が空文字列を無視して既存値を維持する。
     const echoed = store.getSettings();
-    await store.updateSettings({
-      apiKey: echoed.apiKey,
-      moocsPassword: echoed.moocsPassword,
-    });
+    await store.updateSettings(echoed);
 
     expect(store.getRawSettings().apiKey).toBe("sk-real");
     expect(store.getRawSettings().moocsPassword).toBe("secret-pass");

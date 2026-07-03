@@ -125,6 +125,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
     setErrors(newErrors);
   };
 
+  // ── 保存とUI同期 ──
+  // 編集済みフィールドを保存したあと getSettings で再取得し、
+  // hasApiKey/hasMoocsCredentials と機密入力欄を実際の状態に同期する。
+  const persistAndSync = async () => {
+    const partial: Partial<AppSettings> = {};
+    for (const field of editedFields) {
+      partial[field] = settings[field];
+    }
+    if (Object.keys(partial).length > 0 && window.electronAPI?.saveSettings) {
+      await window.electronAPI.saveSettings(partial);
+    }
+    setEditedFields(new Set());
+    if (window.electronAPI?.getSettings) {
+      const reloaded = await window.electronAPI.getSettings();
+      setSettings({ ...DEFAULT_SETTINGS, ...reloaded });
+    }
+  };
+
   // ── 保存 ──
   const handleSave = async () => {
     const validationErrors = validate(settings);
@@ -139,18 +157,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
     setSaveMessage(null);
 
     try {
-      // 編集されたフィールドのみ送信
-      const partial: Partial<AppSettings> = {};
-      for (const field of editedFields) {
-        partial[field] = settings[field];
-      }
-
-      if (window.electronAPI?.saveSettings) {
-        await window.electronAPI.saveSettings(partial);
-      }
+      await persistAndSync();
 
       setSaveMessage({ type: "success", text: "設定を保存しました" });
-      setEditedFields(new Set());
 
       // 3秒後にメッセージをクリア
       setTimeout(() => setSaveMessage(null), 3000);
@@ -169,14 +178,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
     setApiTestResult({ status: "testing" });
     try {
       // Save settings first so the test handler has the latest values
-      const partial: Partial<AppSettings> = {};
-      for (const field of editedFields) {
-        partial[field] = settings[field];
-      }
-      if (Object.keys(partial).length > 0 && window.electronAPI?.saveSettings) {
-        await window.electronAPI.saveSettings(partial);
-        setEditedFields(new Set());
-      }
+      await persistAndSync();
 
       if (window.electronAPI?.testApiConnection) {
         const result = await window.electronAPI.testApiConnection();
@@ -199,14 +201,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
     setMcpTestResult({ status: "testing" });
     try {
       // Save settings first so the login handler has the latest credentials
-      const partial: Partial<AppSettings> = {};
-      for (const field of editedFields) {
-        partial[field] = settings[field];
-      }
-      if (Object.keys(partial).length > 0 && window.electronAPI?.saveSettings) {
-        await window.electronAPI.saveSettings(partial);
-        setEditedFields(new Set());
-      }
+      await persistAndSync();
 
       if (window.electronAPI?.testMcpConnection) {
         const result = await window.electronAPI.testMcpConnection();
