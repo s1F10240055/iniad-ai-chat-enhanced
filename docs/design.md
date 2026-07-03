@@ -220,7 +220,7 @@ iniad-ai-chat-enhanced/
 
 **禁止事項**:
 
-- APIキーの平文の保持・Renderer への露出（設定画面ではマスク表示のみ）
+- APIキー・パス��ードの Renderer への値の送信（設定画面では空欄＋設定済みフラ��のみ）
 - 外部APIの直接呼び出し
 - Node.js 組み込みモジュールの使用
 
@@ -231,7 +231,7 @@ iniad-ai-chat-enhanced/
 - `mcpStatus`: `'connected' | 'disconnected' | 'connecting'`
 - `error`: `string | null`
 - `currentView`: `'chat' | 'settings'`（画面切替）
-- `settings`: `AppSettings`（設定値、マスク済みAPIキー含む）
+- `settings`: `PublicAppSettings`（機密値は空文字列・設定済みフラグ含む）
 
 **送信中 UI 制御**（F11）:
 
@@ -270,7 +270,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getStatus: (): Promise<AppStatus> => ipcRenderer.invoke("app:status"),
 
   // 設定
-  getSettings: (): Promise<AppSettings> => ipcRenderer.invoke("settings:get"),
+  getSettings: (): Promise<PublicAppSettings> => ipcRenderer.invoke("settings:get"),
   saveSettings: (settings: Partial<AppSettings>): Promise<void> =>
     ipcRenderer.invoke("settings:set", settings),
   testApiConnection: (): Promise<{ success: boolean; error?: string }> =>
@@ -299,7 +299,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 | `chat:clear`        | Renderer→Main | なし                   | `void`                           | 履歴クリア      |
 | `app:status`        | Renderer→Main | なし                   | `AppStatus`                      | アプリ状態取得  |
 | `mcp:status`        | Main→Renderer | `status: string`       | なし                             | MCP接続状態通知 |
-| `settings:get`      | Renderer→Main | なし                   | `AppSettings`（APIキーはマスク） | 設定取得        |
+| `settings:get`      | Renderer→Main | なし                   | `PublicAppSettings`（機密は空文字列・フラグ） | 設定取得        |
 | `settings:set`      | Renderer→Main | `Partial<AppSettings>` | `void`                           | 設定保存        |
 | `settings:test-api` | Renderer→Main | なし                   | `{ success, error? }`            | API接続テスト   |
 | `settings:test-mcp` | Renderer→Main | なし                   | `{ success, error? }`            | MCP接続テスト   |
@@ -566,23 +566,23 @@ export class SettingsStore {
     this.settings = this.load();
   }
 
-  /** 設定取得（APIキーはマスクして返す） */
-  get(masked: boolean = true): AppSettings {
-    if (masked) {
-      return {
-        ...this.settings,
-        apiKey: this.maskSecret(this.settings.apiKey),
-        moocsPassword: this.settings.moocsPassword
-          ? this.maskSecret(this.settings.moocsPassword)
-          : "",
-      };
-    }
-    return { ...this.settings };
+  /** 設定取得（機密値は空文字列・設定��みフラグで示す） */
+  get(): PublicAppSettings {
+    return {
+      apiKey: "",
+      baseURL: this.settings.baseURL,
+      model: this.settings.model,
+      moocsUsername: this.settings.moocsUsername,
+      moocsPassword: "",
+      hasApiKey: this.settings.apiKey.length > 0,
+      hasMoocsCredentials:
+        this.settings.moocsUsername.length > 0 && this.settings.moocsPassword.length > 0,
+    };
   }
 
   /** 設定保存（部分更新対応） */
   set(partial: Partial<AppSettings>): void {
-    // 空文字列の場合は既存値を維持（マスク値で上書きしない）
+    // 空文字列の場合は既存値を維持（未編集時の誤上書き防止）
     this.settings = {
       ...this.settings,
       ...Object.fromEntries(
@@ -622,11 +622,6 @@ export class SettingsStore {
       moocsPassword: process.env.INIAD_PASSWORD ?? "",
     };
   }
-
-  private maskSecret(value: string): string {
-    if (!value || value.length <= 8) return "••••••••";
-    return value.slice(0, 4) + "••••" + value.slice(-4);
-  }
 }
 ```
 
@@ -634,7 +629,7 @@ export class SettingsStore {
 
 | 設定キー        | 型       | デフォルト値                          | 説明                         |
 | --------------- | -------- | ------------------------------------- | ---------------------------- |
-| `apiKey`        | `string` | `.env` の `OPENAI_API_KEY`            | INIAD API キー（マスク表示） |
+| `apiKey`        | `string` | `.env` の `OPENAI_API_KEY`            | INIAD API キー（Renderer には送信しない） |
 | `baseUrl`       | `string` | `https://api.openai.iniad.org/api/v1` | API ベース URL               |
 | `model`         | `string` | `gpt-5.4-nano`                        | デフォルトモデル             |
 | `moocsUsername` | `string` | `.env` の `INIAD_USERNAME`            | INIAD MOOCs ユーザ名         |
@@ -643,8 +638,8 @@ export class SettingsStore {
 **セキュリティ**:
 
 - `settings.json` は OS のユーザデータディレクトリに保存（他ユーザからはアクセス不可）
-- APIキー・パスワードは Renderer へマスク値のみ送信
-- 空文字列入力時は既存値を維持（誤ったマスク値での上書き防止）
+- APIキー・パスワードは Renderer へ値を���信せず設定済みフラグのみ送信
+- 空文字列入力時は既存値を維持（未編集時の誤上書き防止）
 
 **機密情報の暗号化（safeStorage）**:
 
@@ -982,7 +977,7 @@ INIAD の講義内容とは異なる場合があることをご了承くださ�
 | -------------------------- | ------------------------------------------------------------------------------- | ------ |
 | APIキー管理                | `settings.json` で管理（ユーザデータディレクトリ）、`.gitignore` でコミット禁止 | 必須   |
 | 機密情報暗号化             | `safeStorage` API で APIキー・パスワードを暗号化（`credentials.enc` に保存）    | 必須   |
-| パスワード管理             | MOOCsパスワードも暗号化保存、Renderer にはマスク値のみ送信                      | 必須   |
+| パスワード管理             | MOOCsパスワードも暗号化保存、Renderer には値を送信せず設定済みフラグのみ        | 必須   |
 | Renderer 分離              | `contextIsolation: true`、`nodeIntegration: false`、`sandbox: true`             | 必須   |
 | CSP                        | `index.html` の meta タグで外部スクリプト・インラインスクリプトを制限           | 必須   |
 | IPC 検証                   | Zod スキーマで IPC チャネルの引数・戻り値を検証                                 | 必須   |
@@ -1020,7 +1015,7 @@ INIAD の講義内容とは異なる場合があることをご了承くださ�
 | AC05 | MCP 接続失敗時にフォールバックメッセージが表示される    | MCPサーバを起動せずにチャット送信                |
 | AC06 | API エラー時に再試行導線が表示される                    | 無効なAPIトークンでチャット送信                  |
 | AC07 | 設定画面からAPIキー・モデル・MOOCs認証を保存できる      | 設定画面で値を入力し保存後、再起動で反映確認     |
-| AC08 | 設定画面にAPIキーがマスク表示される                     | 設定画面を開き、APIキーが伏字であることを確認    |
+| AC08 | 設定画面でAPIキーが空欄・設定済み表示になる             | 設定画面を開き、APIキー欄が空欄・設定済みヒントであることを確認 |
 | AC09 | API接続テストが設定画面から実行できる                   | 有効なAPIキーで「API接続テスト」ボタン押下       |
 | AC10 | MCP接続テストが設定画面から実行できる                   | MOOCs認証情報入力後に「MCP接続テスト」ボタン押下 |
 | AC11 | MCP連携時のエンドツーエンド応答が10秒以内               | `latencyMs` ログで計測・検証                     |
