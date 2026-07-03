@@ -3,9 +3,9 @@
  * SettingsStore と設定画面で使用する型
  */
 
-/** アプリケーション設定 */
+/** アプリケーション設定（保存用・生の値） */
 export interface AppSettings {
-  /** INIAD API キー（設定画面ではマスク表示） */
+  /** INIAD API キー（Renderer には送信しない） */
   apiKey: string;
   /** API ベースURL */
   baseURL: string;
@@ -13,8 +13,32 @@ export interface AppSettings {
   model: string;
   /** INIAD MOOCs ユーザー名（学籍番号） */
   moocsUsername: string;
-  /** INIAD MOOCs パスワード（設定画面ではマスク表示） */
+  /** INIAD MOOCs パスワード（Renderer には送信しない） */
   moocsPassword: string;
+}
+
+/**
+ * 設定画面（Renderer）への受け渡し用設定
+ *
+ * 機密フィールド（apiKey, moocsPassword）は値を含まず常に空文字列。
+ * 設定済みかどうかは hasApiKey / hasMoocsCredentials フラグで示す。
+ * これにより未編集の機密値が誤って上書き保存される事故を防ぐ。
+ */
+export interface PublicAppSettings {
+  /** INIAD API キー（常に空文字列・値は送信しない） */
+  apiKey: string;
+  /** API ベースURL */
+  baseURL: string;
+  /** デフォルトモデル名 */
+  model: string;
+  /** INIAD MOOCs ユーザー名（学籍番号） */
+  moocsUsername: string;
+  /** INIAD MOOCs パスワード（常に空文字列・値は送信しない） */
+  moocsPassword: string;
+  /** API キーが保存済みか */
+  hasApiKey: boolean;
+  /** MOOCs 認証情報（ユーザー名＋パスワード）が保存済みか */
+  hasMoocsCredentials: boolean;
 }
 
 /** AppSettings のデフォルト値 */

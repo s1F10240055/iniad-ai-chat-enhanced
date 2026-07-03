@@ -8,10 +8,12 @@
 import { app } from "electron";
 import { promises as fs } from "fs";
 import { join } from "path";
-import { AppSettings, DEFAULT_SETTINGS, PartialAppSettings } from "../../shared/types/settings";
-
-/** マスク文字列 */
-const MASKED_VALUE = "••••••••";
+import {
+  AppSettings,
+  DEFAULT_SETTINGS,
+  PartialAppSettings,
+  PublicAppSettings,
+} from "../../shared/types/settings";
 
 /** 設定ファイル名 */
 const SETTINGS_FILE = "settings.json";
@@ -41,10 +43,15 @@ export class SettingsStore {
    * 設定ストアの初期化
    * 設定ファイルが存在しない場合はデフォルト値を作成する
    */
-  async init(): Promise<void> {
+  async init(customPath?: string): Promise<void> {
     // Electron app が初期化された後にパスを解決する
-    const userDataPath = app.getPath("userData");
-    this.settingsPath = join(userDataPath, SETTINGS_FILE);
+    // customPath はテスト用（省略時は userData 配下を使用）
+    if (customPath) {
+      this.settingsPath = customPath;
+    } else {
+      const userDataPath = app.getPath("userData");
+      this.settingsPath = join(userDataPath, SETTINGS_FILE);
+    }
 
     try {
       await this.ensureSettingsFile();
@@ -58,13 +65,25 @@ export class SettingsStore {
   }
 
   /**
-   * 設定を取得する（APIキー・パスワードはマスク済み）
+   * 設定を取得する（APIキー・パスワードは値を含まず空文字列・設定済みフラグで示す）
+   *
+   * 機密値を Renderer に送らないことで、未編集時の誤上書きを防ぐ。
+   * 設定済みかどうかは hasApiKey / hasMoocsCredentials フラグで伝える。
    */
-  getSettings(): AppSettings {
+  getSettings(): PublicAppSettings {
     if (!this.cache) {
       throw new Error("SettingsStore not initialized. Call init() first.");
     }
-    return this.maskSensitiveFields(this.cache);
+    return {
+      apiKey: "",
+      baseURL: this.cache.baseURL,
+      model: this.cache.model,
+      moocsUsername: this.cache.moocsUsername,
+      moocsPassword: "",
+      hasApiKey: this.cache.apiKey.length > 0,
+      hasMoocsCredentials:
+        this.cache.moocsUsername.length > 0 && this.cache.moocsPassword.length > 0,
+    };
   }
 
   /**
@@ -178,17 +197,6 @@ export class SettingsStore {
   private async saveToFile(settings: AppSettings): Promise<void> {
     const content = JSON.stringify(settings, null, 2);
     await fs.writeFile(this.settingsPath, content, "utf-8");
-  }
-
-  /**
-   * 機密フィールドをマスクする
-   */
-  private maskSensitiveFields(settings: AppSettings): AppSettings {
-    return {
-      ...settings,
-      apiKey: settings.apiKey ? MASKED_VALUE : "",
-      moocsPassword: settings.moocsPassword ? MASKED_VALUE : "",
-    };
   }
 }
 

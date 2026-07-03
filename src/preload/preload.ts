@@ -9,7 +9,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import type {
   ChatResponse,
   ChatTurn,
-  AppSettings,
+  PublicAppSettings,
   AppStatus,
   PartialAppSettings,
   ConnectionTestResult,
@@ -36,8 +36,8 @@ const api = {
   getStatus: (): Promise<AppStatus> => ipcRenderer.invoke("app:status"),
 
   // ── 設定 ──
-  /** 設定値を取得する（APIキーはマスク済み） */
-  getSettings: (): Promise<AppSettings> => ipcRenderer.invoke("settings:get"),
+  /** 設定値を取得する（機密値は空文字列・設定済みフラグで示す） */
+  getSettings: (): Promise<PublicAppSettings> => ipcRenderer.invoke("settings:get"),
 
   /** 設定値を部分更新する（空文字列は既存値を維持） */
   saveSettings: (settings: PartialAppSettings): Promise<void> =>

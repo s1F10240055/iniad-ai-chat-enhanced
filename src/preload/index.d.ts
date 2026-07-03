@@ -8,7 +8,7 @@
 import type {
   ChatResponse,
   ChatTurn,
-  AppSettings,
+  PublicAppSettings,
   AppStatus,
   PartialAppSettings,
   ConnectionTestResult,
@@ -28,7 +28,7 @@ export interface ElectronAPI {
   getStatus: () => Promise<AppStatus>;
 
   // ── 設定 ──
-  getSettings: () => Promise<AppSettings>;
+  getSettings: () => Promise<PublicAppSettings>;
   saveSettings: (settings: PartialAppSettings) => Promise<void>;
   testApiConnection: () => Promise<ConnectionTestResult>;
   testMcpConnection: () => Promise<ConnectionTestResult>;

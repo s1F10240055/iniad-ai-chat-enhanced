@@ -26,7 +26,7 @@
 | A05      | ローディング・エラー状態UI                   | `src/renderer/components/StatusBar.tsx`     | W3   |
 | A06      | MCP接続ステータスバー                        | `src/renderer/components/StatusBar.tsx`     | W3   |
 | A07      | 設定画面UI実装（APIキー・モデル・MOOCs認証） | `src/renderer/components/SettingsView.tsx`  | W3-4 |
-| A08      | 設定画面フォームバリデーション・マスク表示   | `src/renderer/components/SettingsView.tsx`  | W4   |
+| A08      | 設定画面フォームバリデーション・設定済み表示   | `src/renderer/components/SettingsView.tsx`  | W4   |
 | A09      | 画面切替（チャット ↔ 設定）トランジション    | `src/renderer/App.tsx`                      | W4   |
 | A10      | UIレスポンシブ調整・ポリッシュ               | `src/renderer/index.css`                    | W5   |
 | A11      | 手動テスト観点整理・実行                     | テスト観点ドキュメント                      | W5   |
@@ -59,7 +59,7 @@
 | B11      | レスポンス整形（回答テキスト + 参照元抽出）                        | `src/main/services/response-composer.ts`      | W3   |
 | B12      | Chat Service 統合（Retrieval → Prompt → API → Response）           | `src/main/services/chat-service.ts`           | W3   |
 | B13      | フォールバックロジック実装                                         | `src/main/services/chat-service.ts`           | W3   |
-| B14      | SettingsStore 実装（設定の永続化・読込・マスク処理）               | `src/main/services/settings-store.ts`         | W2-3 |
+| B14      | SettingsStore 実装（設定の永続化・読込・安全な受け渡し）           | `src/main/services/settings-store.ts`         | W2-3 |
 | B15      | エラーパターン一覧作成                                             | ドキュメント                                  | W4   |
 
 **技術スタック**: Node.js, Electron API, IPC, TypeScript, React（Renderer側）, Zod（IPC検証）
@@ -73,7 +73,7 @@
 | `chat:clear`         | なし                   | `void`                           |
 | `app:status`         | なし                   | `AppStatus`                      |
 | `mcp:status`（通知） | `status: string`       | なし                             |
-| `settings:get`       | なし                   | `AppSettings`（APIキーはマスク） |
+| `settings:get`       | なし                   | `PublicAppSettings`（機密は空文字列・設定済みフラグで示す） |
 | `settings:set`       | `Partial<AppSettings>` | `void`                           |
 | `settings:test-api`  | なし                   | `{ success, error? }`            |
 | `settings:test-mcp`  | なし                   | `{ success, error? }`            |
@@ -274,5 +274,5 @@ main          ← 安定版。PR承認後のみマージ
 - **型定義**: 公開関数には必ず TypeScript の型アノテーションを記述
 - **エラー処理**: 非同期処理は必ず try-catch で囲む
 - **秘密情報**: コミットに `.env` や API キーを含めない
-- **設定管理**: APIキー・パスワードは `SettingsStore` で管理、Renderer にはマスク値のみ送信
+- **設定管理**: APIキー・パスワードは `SettingsStore` で管理、Renderer には値を送信せず設定済みフラグのみ送信
 - **依存パッケージ追加**: 追加前に全メンバーに相談
