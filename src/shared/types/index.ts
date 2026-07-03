@@ -6,6 +6,7 @@ export type { ChatTurn, Citation, ChatResponse, ChatCompletionResponse } from ".
 
 export type {
   AppSettings,
+  PublicAppSettings,
   PartialAppSettings,
   AppStatus,
   McpStatus,

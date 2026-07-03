@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import type { AppSettings } from "../../shared/types";
+import React, { useState, useEffect, useCallback } from "react";
+import type { AppSettings, PublicAppSettings } from "../../shared/types";
 import { DEFAULT_SETTINGS } from "../../shared/types";
 
 /** バリデーションエラーの型 */
@@ -29,12 +29,6 @@ const AVAILABLE_MODELS = [
   { value: "gpt-5.4", label: "GPT-5.4 (高性能)" },
 ];
 
-/** APIキー・パスワードをマスク表示する */
-function maskSecret(value: string): string {
-  if (!value || value.length <= 4) return "●●●●●●●●";
-  return "●".repeat(value.length - 4) + value.slice(-4);
-}
-
 /** URLバリデーション */
 function isValidURL(url: string): boolean {
   try {
@@ -47,7 +41,12 @@ function isValidURL(url: string): boolean {
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
   // ── State ──
-  const [settings, setSettings] = useState<AppSettings>({ ...DEFAULT_SETTINGS });
+  // settings は表示用（PublicAppSettings）。機密値は含まず、設定済みフラグで状態を示す。
+  const [settings, setSettings] = useState<PublicAppSettings>({
+    ...DEFAULT_SETTINGS,
+    hasApiKey: false,
+    hasMoocsCredentials: false,
+  });
   const [editedFields, setEditedFields] = useState<Set<keyof AppSettings>>(new Set());
   const [errors, setErrors] = useState<ValidationErrors>({});
   const [showApiKey, setShowApiKey] = useState(false);
@@ -59,48 +58,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
   } | null>(null);
   const [apiTestResult, setApiTestResult] = useState<TestResult>({ status: "idle" });
   const [mcpTestResult, setMcpTestResult] = useState<TestResult>({ status: "idle" });
-
-  // ── 最後の文字を一瞬見せるマスキング ──
-  const [revealIndex, setRevealIndex] = useState<{ field: string; index: number } | null>(null);
-  const revealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (revealTimerRef.current) clearTimeout(revealTimerRef.current);
-    };
-  }, []);
-
-  /** 秘密フィールドの表示値を生成（最後の1文字だけ一瞬見せる） */
-  const _getMaskedValue = (field: string, raw: string, forceShow: boolean): string => {
-    if (!raw) return "";
-    if (forceShow) return raw;
-    return raw
-      .split("")
-      .map((ch, i) => {
-        if (revealIndex && revealIndex.field === field && revealIndex.index === i) {
-          return ch; // 最後に打った文字を一瞬表示
-        }
-        return "●";
-      })
-      .join("");
-  };
-
-  /** 秘密フィールドの更新（最後の文字を一瞬見せてからマスク） */
-  const updateSecretField = (field: keyof AppSettings, newValue: string) => {
-    const oldValue = settings[field];
-    updateField(field, newValue);
-
-    // 文字が追加された場合のみ、最後の文字を一瞬見せる
-    if (newValue.length > oldValue.length) {
-      if (revealTimerRef.current) clearTimeout(revealTimerRef.current);
-      setRevealIndex({ field, index: newValue.length - 1 });
-      revealTimerRef.current = setTimeout(() => {
-        setRevealIndex(null);
-      }, 600);
-    } else {
-      setRevealIndex(null);
-    }
-  };
 
   // ── 初期読み込み ──
   useEffect(() => {
@@ -120,7 +77,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
 
   // ── バリデーション ──
   const validate = useCallback(
-    (current: AppSettings): ValidationErrors => {
+    (current: PublicAppSettings): ValidationErrors => {
       const errs: ValidationErrors = {};
 
       // APIキー: 編集済みかつ空の場合のみエラー
@@ -142,7 +99,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
       const hasUsername = current.moocsUsername.trim().length > 0;
       const hasPassword = editedFields.has("moocsPassword")
         ? current.moocsPassword.trim().length > 0
-        : current.moocsPassword.length > 0; // マスク値でも存在判定
+        : current.hasMoocsCredentials;
 
       if (hasUsername && !hasPassword) {
         errs.moocsPassword = "パスワードも入力してください";
@@ -269,13 +226,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
   };
 
   // ── 表示ヘルパー ──
-  const _getSecretDisplayValue = (field: "apiKey" | "moocsPassword", showRaw: boolean): string => {
-    const value = settings[field];
-    if (!value) return "";
-    if (editedFields.has(field)) return value; // 編集中は常に平文
-    return showRaw ? value : maskSecret(value);
-  };
-
   const renderTestButton = (label: string, result: TestResult, onTest: () => void) => (
     <div className="settings-test-row">
       <button
@@ -369,8 +319,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
                 type={showApiKey ? "text" : "password"}
                 className={`settings-input settings-secret-input ${errors.apiKey ? "error" : ""}`}
                 value={settings.apiKey}
-                onChange={(e) => updateSecretField("apiKey", e.target.value)}
-                placeholder="sk-..."
+                onChange={(e) => updateField("apiKey", e.target.value)}
+                placeholder={settings.hasApiKey ? "設定済み（変更時のみ入力）" : "sk-..."}
                 autoComplete="off"
               />
               <button
@@ -401,7 +351,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
               </button>
             </div>
             {errors.apiKey && <span className="settings-error">{errors.apiKey}</span>}
-            <span className="settings-hint">※ INIAD Slack「GPT-4o mini」で取得可能</span>
+            <span className="settings-hint">
+              {settings.hasApiKey
+                ? "✓ APIキーは設定済みです（変更時のみ入力）"
+                : "※ INIAD Slack「GPT-4o mini」で取得可能"}
+            </span>
           </div>
 
           <div className="settings-field">
@@ -516,8 +470,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
                 type={showMoocsPassword ? "text" : "password"}
                 className={`settings-input settings-secret-input ${errors.moocsPassword ? "error" : ""}`}
                 value={settings.moocsPassword}
-                onChange={(e) => updateSecretField("moocsPassword", e.target.value)}
-                placeholder="パスワード"
+                onChange={(e) => updateField("moocsPassword", e.target.value)}
+                placeholder={
+                  settings.hasMoocsCredentials ? "設定済み（変更時のみ入力）" : "パスワード"
+                }
                 autoComplete="off"
               />
               <button
