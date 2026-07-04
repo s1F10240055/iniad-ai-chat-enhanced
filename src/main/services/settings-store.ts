@@ -74,15 +74,18 @@ export class SettingsStore {
     // credentials.enc は settings.json と同��ディレクトリに置く
     this.credentialsPath = join(dirname(this.settingsPath), CREDENTIALS_FILE);
 
+    // マイグレーションとファイル作成: 書き込みエラーは呼び出し側へ伝播させる
+    // （一時的な書き込み失敗で既存の正常な設定をデフォルト値で上書きしないため）
+    await this.migrateLegacySecrets();
+    await this.ensureSettingsFile();
+
+    // 読み込み: 失敗時はデフォルト値で起動するがファイルは上書きしない
+    // （loadFromFiles は内部で破損リカバリ済み。予期せぬエラー時のみこの catch に到達）
     try {
-      await this.migrateLegacySecrets();
-      await this.ensureSettingsFile();
       this.cache = await this.loadFromFiles();
     } catch (error) {
-      // 読み込み失敗時はデフォルト値を使用し、ファイルを修復する
-      console.error("Failed to load settings, using defaults and healing files:", error);
+      console.error("Failed to load settings, using defaults:", error);
       this.cache = { ...DEFAULT_SETTINGS };
-      await this.saveAllFiles(this.cache);
     }
   }
 
@@ -127,8 +130,10 @@ export class SettingsStore {
       throw new Error("SettingsStore not initialized. Call init() first.");
     }
 
-    // 前の更新が完了するまで待つことで、レースコンディションを防止
-    this.updateQueue = this.updateQueue.then(async () => {
+    // 前の更新が完了するまで待つことで、レースコンディションを防止。
+    // saveAllFiles の失敗でキューが rejected のまま残ると後続の更新がすべて止まるため、
+    // キュー自体は常に resolve させ、失敗は呼び出し側にのみ返す。
+    const result = this.updateQueue.then(async () => {
       const updated = { ...this.cache! };
 
       // 既知のキーのみを許可（未知のキーやプロトタイプ汚染対策）
@@ -150,7 +155,9 @@ export class SettingsStore {
       await this.saveAllFiles(updated);
     });
 
-    await this.updateQueue;
+    // キューは常に resolve させ（後続の更新を止めない）、現���の呼び出しには結果を伝播
+    this.updateQueue = result.catch(() => undefined);
+    await result;
   }
 
   /**

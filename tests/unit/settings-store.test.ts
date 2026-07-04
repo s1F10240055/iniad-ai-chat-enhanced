@@ -4,19 +4,18 @@ import { join, dirname } from "path";
 import { tmpdir } from "os";
 import { randomUUID } from "crypto";
 
-// safeStorage は vi.fn で定義し、テスト内で vi.mocked() により挙動を切り替える
-// （フォールバックテスト��� isEncryptionAvailable を false にするなど）。
+// safeStorage は vi.fn() で定義し、beforeEach で実装を設定する。
+// 実際の safeStorage と同様に「isEncryptionAvailable() が false のときは
+// encryptString/decryptString が例外を投げる」挙動にして、フォールバック分岐を検証する。
 vi.mock("electron", () => ({
   app: { getPath: vi.fn(() => tmpdir()) },
   safeStorage: {
-    isEncryptionAvailable: vi.fn(() => true),
-    // 可逆な単純変換（UTF-8 Buffer）。本番の OS 暗号化の代用。
-    encryptString: vi.fn((s: string) => Buffer.from(s, "utf-8")),
-    decryptString: vi.fn((b: Buffer) => b.toString("utf-8")),
+    isEncryptionAvailable: vi.fn(),
+    encryptString: vi.fn(),
+    decryptString: vi.fn(),
   },
 }));
 
-// vi.mock は hoisting ���れるので、import はモック適用後に解決される
 import { safeStorage } from "electron";
 import { SettingsStore } from "../../src/main/services/settings-store";
 
@@ -36,10 +35,16 @@ describe("SettingsStore", () => {
   let credPath: string;
 
   beforeEach(async () => {
-    // safeStorage デフォルト（暗号化利用可能・可逆変換）に戻す
+    // safeStorage モック: 可用性チェックを通過した場合のみ成功（実装の呼び分けを検証）
     vi.mocked(safeStorage.isEncryptionAvailable).mockReturnValue(true);
-    vi.mocked(safeStorage.encryptString).mockImplementation((s: string) => Buffer.from(s, "utf-8"));
-    vi.mocked(safeStorage.decryptString).mockImplementation((b: Buffer) => b.toString("utf-8"));
+    vi.mocked(safeStorage.encryptString).mockImplementation((s: string) => {
+      if (!safeStorage.isEncryptionAvailable()) throw new Error("safeStorage unavailable");
+      return Buffer.from(s, "utf-8");
+    });
+    vi.mocked(safeStorage.decryptString).mockImplementation((b: Buffer) => {
+      if (!safeStorage.isEncryptionAvailable()) throw new Error("safeStorage unavailable");
+      return b.toString("utf-8");
+    });
 
     tempPath = join(tmpdir(), `settings-test-${randomUUID()}.json`);
     credPath = join(dirname(tempPath), "credentials.enc");
@@ -57,7 +62,7 @@ describe("SettingsStore", () => {
     }
   });
 
-  // ── 既存の基本テスト（暗号化下でも契約不变） ──
+  // ── 基本テスト（暗号化下でも契約不变） ──
 
   it("updateSettings で apiKey が保存され getRawSettings で読める", async () => {
     await store.updateSettings({ apiKey: "sk-real" });
@@ -71,7 +76,7 @@ describe("SettingsStore", () => {
     expect(publicSettings.moocsPassword).toBe("");
   });
 
-  it("非機密フィールドは getSettings で実値が返る", async () => {
+  it("非機���フィールドは getSettings で実値が返る", async () => {
     await store.updateSettings({
       baseURL: "https://example.com/v1",
       model: "gpt-test",
@@ -117,7 +122,7 @@ describe("SettingsStore", () => {
     expect(reloaded.getRawSettings().moocsPassword).toBe("パスワード123");
   });
 
-  it("credentials.enc に機密の平文が含まれな��", async () => {
+  it("credentials.enc に機密の平文が含まれない", async () => {
     await store.updateSettings({ apiKey: "sk-secret-key", moocsPassword: "plain-secret-pass" });
     const credContent = await fs.readFile(credPath, "utf-8");
     expect(credContent).not.toContain("sk-secret-key");
@@ -135,7 +140,7 @@ describe("SettingsStore", () => {
   });
 
   it("旧形式（平文 settings.json に機密含む）から credentials.enc に自動移行する", async () => {
-    // init が作ったファイルを一旦削除し、旧形式の平文 settings.json ���置く
+    // init が作ったファイルを一旦削除し、旧形式の平文 settings.json を置く
     await fs.unlink(tempPath);
     if (await exists(credPath)) await fs.unlink(credPath);
     const legacy = {
@@ -168,22 +173,62 @@ describe("SettingsStore", () => {
     expect(credContent).not.toContain("legacy-pass");
   });
 
+  it("credentials.enc が既存の場合は settings.json の旧機密を無視し credentials.enc を正とする", async () => {
+    // まず credentials.enc を新しい機密で作成
+    await store.updateSettings({ apiKey: "fresh-key", moocsPassword: "fresh-pass" });
+    // settings.json に古い機密が残っている（旧形式）状態を再現
+    const staleSettings = {
+      apiKey: "stale-key",
+      baseURL: "https://example.com/v1",
+      model: "gpt-test",
+      moocsUsername: "user",
+      moocsPassword: "stale-pass",
+    };
+    await fs.writeFile(tempPath, JSON.stringify(staleSettings, null, 2), "utf-8");
+
+    const reloaded = new SettingsStore();
+    await reloaded.init(tempPath);
+
+    // credentials.enc 側の新しい機密が優先される
+    expect(reloaded.getRawSettings().apiKey).toBe("fresh-key");
+    expect(reloaded.getRawSettings().moocsPassword).toBe("fresh-pass");
+    // settings.json から機密が削除されて正規化される
+    const settingsAfter = JSON.parse(await fs.readFile(tempPath, "utf-8"));
+    expect(settingsAfter).not.toHaveProperty("apiKey");
+    expect(settingsAfter).not.toHaveProperty("moocsPassword");
+  });
+
   it("credentials.enc の復号に失敗した場合は .bak に退避し機密は空にフォールバックする", async () => {
     await store.updateSettings({ apiKey: "sk-real", moocsPassword: "secret" });
-    // credentials.enc を復号不能な内容で破損させる
+    // credentials.enc を復号不能な内容で破損させる（JSON パース失敗を引き起こす）
     await fs.writeFile(credPath, "this-is-not-valid-encrypted-content", "utf-8");
 
     const reloaded = new SettingsStore();
     await reloaded.init(tempPath);
 
-    // 機密は空（ユーザー再入力が必要）
     expect(reloaded.getRawSettings().apiKey).toBe("");
     expect(reloaded.getRawSettings().moocsPassword).toBe("");
-    // 破損ファイルは .bak に退避されている
     expect(await exists(`${credPath}.bak`)).toBe(true);
   });
 
-  it("safeStorage が利用不可の場合は平文フォールバックで保存・復元��きる", async () => {
+  it("safeStorage.decryptString 自体が例外を投げる場合も .bak に退避し機密は空にフォールバックする", async () => {
+    await store.updateSettings({ apiKey: "sk-real", moocsPassword: "secret" });
+    // decryptString が例外を投げる状況（OS 復号エラー相当）をシミュレート
+    vi.mocked(safeStorage.decryptString).mockImplementation(() => {
+      throw new Error("decrypt failed");
+    });
+
+    const reloaded = new SettingsStore();
+    await reloaded.init(tempPath);
+
+    expect(reloaded.getRawSettings().apiKey).toBe("");
+    expect(reloaded.getRawSettings().moocsPassword).toBe("");
+    expect(await exists(`${credPath}.bak`)).toBe(true);
+  });
+
+  it("safeStorage が利用不可の場合は平文フォールバックで保存・復元できる", async () => {
+    // このテストの冒頭で可用性を切る（実装が可用性をチェックせず encryptString を
+    // 盲目的に呼ぶと、モックが throw するのでテストが失敗す���）
     vi.mocked(safeStorage.isEncryptionAvailable).mockReturnValue(false);
 
     const fallback = new SettingsStore();

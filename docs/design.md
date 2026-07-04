@@ -665,6 +665,8 @@ APIキーと MOOCs パスワードは `settings.json` に平文保存せず、El
 
 **脅威モデルの注意**: safeStorage（Windows は DPAPI、macOS は Keychain）はディスク上の平文露出を防ぐが、同一ユーザー権限で動くマルウェアやログイン中の物理アクセスからは完全には保護しない（OS 資格情報で復号可能）。真の保護には OS ユーザーアカウント保護・ディスク暗号化（BitLocker/FileVault）の併用が必要。
 
+**平文フォールバック**: safeStorage が利用不可（Linux の一部環境等）の場合は、credentials.enc に平文 JSON（`plaintext:` プレフィックス付き base64）でフ���ールバック保存し、コンソールで警告する。Windows/macOS では常に暗号化される。
+
 **ファイル破損リカバリ**:
 
 ```ts
