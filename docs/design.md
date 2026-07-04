@@ -646,21 +646,24 @@ export class SettingsStore {
 ```ts
 import { safeStorage } from "electron";
 
-// 保存時: 暗号化
+// 保存時: 機密情報（apiKey/moocsPassword）を1つの JSON にまとめて暗号化
+const secrets = JSON.stringify({ apiKey, moocsPassword });
 if (safeStorage.isEncryptionAvailable()) {
-  const encrypted = safeStorage.encryptString(apiKey);
-  fs.writeFileSync(encryptedPath, encrypted.toString("base64"));
+  const encrypted = safeStorage.encryptString(secrets);
+  fs.writeFileSync(credentialsPath, encrypted.toString("base64"));
 }
 
-// 読込時: 復号
+// 読込時: 復号して JSON をパース
 const encrypted = Buffer.from(
-  fs.readFileSync(encryptedPath, "utf-8"),
+  fs.readFileSync(credentialsPath, "utf-8"),
   "base64",
 );
-const decrypted = safeStorage.decryptString(encrypted);
+const secrets = JSON.parse(safeStorage.decryptString(encrypted));
 ```
 
-APIキーと MOOCs パスワードは `settings.json` に平文保存せず、Electron の `safeStorage` API で暗号化して `credentials.enc` に別途保存する。`settings.json` には機密情報以外の設定値のみを格納する。
+APIキーと MOOCs パスワードは `settings.json` に平文保存せず、Electron の `safeStorage` API で暗号化して `credentials.enc` に別途保存する。`settings.json` ��は機密情報以外の設定値のみを格納する。
+
+**脅威モデルの注意**: safeStorage（Windows は DPAPI、macOS は Keychain）はディスク上の平文露出を防ぐが、同一ユーザー権限で動くマルウェアやログイン中の物理アクセスからは完全には保護しない（OS 資格情報で復号可能）。真の保護には OS ユーザーアカウント保護・ディスク暗号化（BitLocker/FileVault）の併用が必要。
 
 **ファイル破損リカバリ**:
 
