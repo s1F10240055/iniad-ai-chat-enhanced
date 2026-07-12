@@ -17,12 +17,11 @@ import type { SlidesIndexService } from "./slides-index";
 import { MOOCS_AGENT_TOOLS } from "./moocs-tool-definitions";
 import { executeAgentTool } from "./moocs-tool-executor";
 import { prepareApiMessages, estimatePayloadChars } from "./agent-api-messages";
+import { apiRequestJson } from "./api-client";
 
 const MAX_ITERATIONS = 10;
 const MAX_HISTORY_TURNS = 6;
 const MAX_HISTORY_CHARS = 2_000;
-const API_TIMEOUT_MS = 120_000;
-const API_RETRY_COUNT = 2;
 
 const AGENT_SYSTEM_PROMPT = `あなたは INIAD MOOCs の学習アシスタントです。
 ユーザーの質問に答えるために、提供されたツールを使って MOOCs を能動的に調べてください。
@@ -84,8 +83,6 @@ export class ChatAgent {
 
     const allCitations: Citation[] = [];
     const slideReadCache = new Map<string, string>();
-    const apiUrl = `${settings.baseURL}/chat/completions`;
-
     for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
       if (signal?.aborted) {
         throw new Error("リクエストがキャンセルされました");
@@ -96,10 +93,10 @@ export class ChatAgent {
       const apiMessages = prepareApiMessages(messages);
 
       console.log(
-        `[Agent] iteration ${iteration + 1}/${MAX_ITERATIONS}, messages=${messages.length}, payload≈${estimatePayloadChars(apiMessages)} chars, forceFinal=${forceFinalAnswer}`
+        `[Agent] iteration ${iteration + 1}/${MAX_ITERATIONS}, messages=${messages.length}, payload~${estimatePayloadChars(apiMessages)} chars, forceFinal=${forceFinalAnswer}`
       );
 
-      const response = await this.callApi(apiUrl, settings, apiMessages, signal, {
+      const response = await this.callApi(settings, apiMessages, signal, {
         allowTools: !forceFinalAnswer,
         finalAnswerHint: isLastIteration,
       });
@@ -174,7 +171,6 @@ export class ChatAgent {
   }
 
   private async callApi(
-    apiUrl: string,
     settings: AppSettings,
     messages: AgentMessage[],
     signal?: AbortSignal,
@@ -204,48 +200,14 @@ export class ChatAgent {
       body.tool_choice = "auto";
     }
 
-    let lastError: unknown;
-
-    for (let attempt = 1; attempt <= API_RETRY_COUNT; attempt++) {
-      try {
-        const timeoutSignal = AbortSignal.timeout(API_TIMEOUT_MS);
-        const combinedSignal =
-          signal && typeof AbortSignal.any === "function"
-            ? AbortSignal.any([signal, timeoutSignal])
-            : (signal ?? timeoutSignal);
-
-        const response = await fetch(apiUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${settings.apiKey}`,
-          },
-          body: JSON.stringify(body),
-          signal: combinedSignal,
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text().catch(() => "Unknown error");
-          throw new Error(`API request failed (${response.status}): ${errorText}`);
-        }
-
-        return (await response.json()) as ChatCompletionResponse;
-      } catch (error) {
-        lastError = error;
-        // ユーザーキャンセルは汎用 API 失敗にせず、キャンセル専用メッセージで即時再スロー
-        if (signal?.aborted) throw new Error("リクエストがキャンセルされました");
-        const msg = error instanceof Error ? error.message : String(error);
-        console.warn(`[Agent] API call attempt ${attempt}/${API_RETRY_COUNT} failed: ${msg}`);
-        if (attempt < API_RETRY_COUNT && !signal?.aborted) {
-          await new Promise((r) => setTimeout(r, 1000 * attempt));
-        }
-      }
-    }
-
-    const msg = lastError instanceof Error ? lastError.message : String(lastError);
-    throw new Error(
-      `API呼び出しに失敗しました (${apiUrl}): ${msg}。調査が長くなった場合は質問を絞って再試行してください。`
-    );
+    return apiRequestJson<ChatCompletionResponse>({
+      apiKey: settings.apiKey,
+      baseURL: settings.baseURL,
+      path: "chat/completions",
+      method: "POST",
+      body,
+      signal,
+    });
   }
 
   private buildSyllabusHint(userText: string): string {
