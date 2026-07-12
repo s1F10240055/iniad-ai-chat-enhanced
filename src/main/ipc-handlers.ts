@@ -23,6 +23,12 @@ import { settingsStore } from "./services/settings-store";
 import type { ChatTurn } from "../shared/types/chat";
 import type { McpStatus } from "../shared/types/settings";
 import type { ChatResponse } from "../shared/types/chat";
+import { apiRequestJson } from "./services/api-client";
+
+interface ModelsResponse {
+  data?: Array<{ id?: string }>;
+  error?: { message?: string };
+}
 
 const services = createAppServices();
 const { store, mcpClient, chatAgent } = services;
@@ -159,22 +165,28 @@ export function registerIpcHandlers(): void {
     }
 
     try {
-      const url = `${settings.baseURL}/models`;
-      const response = await fetch(url, {
-        headers: { Authorization: `Bearer ${settings.apiKey}` },
-        signal: AbortSignal.timeout(10_000),
+      const data = await apiRequestJson<ModelsResponse>({
+        apiKey: settings.apiKey,
+        baseURL: settings.baseURL,
+        path: "models",
+        timeoutMs: 10_000,
+        maxAttempts: 2,
       });
-
-      if (!response.ok) {
-        return { success: false, error: `API returned ${response.status}` };
-      }
-
-      const data = (await response.json()) as { data?: unknown[]; error?: { message?: string } };
       if (data.error) {
         return { success: false, error: data.error.message || "認証エラー" };
       }
       if (!data.data || !Array.isArray(data.data)) {
         return { success: false, error: "APIレスポンスが不正です" };
+      }
+
+      const modelIds = data.data
+        .map((model) => model.id)
+        .filter((id): id is string => typeof id === "string");
+      if (modelIds.length > 0 && !modelIds.includes(settings.model)) {
+        return {
+          success: false,
+          error: `APIには接続できましたが、モデル ${settings.model} は利用可能一覧にありません`,
+        };
       }
 
       return { success: true };
