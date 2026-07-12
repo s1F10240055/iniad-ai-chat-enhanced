@@ -76,10 +76,7 @@ export async function apiRequestJson<T>(options: ApiRequestOptions): Promise<T> 
       });
 
       if (!response.ok) {
-        const body = sanitizeErrorBody(
-          await readBoundedResponseText(response),
-          options.apiKey
-        );
+        const body = sanitizeErrorBody(await readBoundedResponseText(response), options.apiKey);
         const suffix = body ? `: ${body}` : "";
         const error = new ApiRequestError(
           httpErrorMessage(response.status) + suffix,
