@@ -182,7 +182,10 @@ export function registerIpcHandlers(): void {
       const modelIds = data.data
         .map((model) => model.id)
         .filter((id): id is string => typeof id === "string");
-      if (modelIds.length > 0 && !modelIds.includes(settings.model)) {
+      if (modelIds.length !== data.data.length) {
+        return { success: false, error: "APIレスポンスが不正です" };
+      }
+      if (!modelIds.includes(settings.model)) {
         return {
           success: false,
           error: `APIには接続できましたが、モデル ${settings.model} は利用可能一覧にありません`,

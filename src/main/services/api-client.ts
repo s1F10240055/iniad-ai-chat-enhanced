@@ -1,6 +1,7 @@
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_ATTEMPTS = 3;
 const MAX_ERROR_BODY_CHARS = 1_000;
+const MAX_ERROR_BODY_BYTES = 4_096;
 
 const RETRYABLE_STATUS = new Set([408, 429]);
 const RETRYABLE_NETWORK_CODES = new Set([
@@ -24,6 +25,8 @@ export interface ApiRequestOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
   maxAttempts?: number;
+  /** POSTなどの非冪等リクエストは既定で再試行しない。 */
+  retry?: boolean;
 }
 
 export class ApiRequestError extends Error {
@@ -50,6 +53,8 @@ export function buildApiUrl(baseURL: string, path: string): string {
 
 export async function apiRequestJson<T>(options: ApiRequestOptions): Promise<T> {
   const url = buildApiUrl(options.baseURL, options.path);
+  const method = options.method ?? (options.body === undefined ? "GET" : "POST");
+  const shouldRetry = options.retry ?? method === "GET";
   const maxAttempts = Math.max(1, options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS);
   let lastError: ApiRequestError | undefined;
 
@@ -61,7 +66,7 @@ export async function apiRequestJson<T>(options: ApiRequestOptions): Promise<T> 
 
     try {
       const response = await fetch(url, {
-        method: options.method ?? (options.body === undefined ? "GET" : "POST"),
+        method,
         headers: {
           Authorization: `Bearer ${options.apiKey}`,
           ...(options.body === undefined ? {} : { "Content-Type": "application/json" }),
@@ -71,14 +76,19 @@ export async function apiRequestJson<T>(options: ApiRequestOptions): Promise<T> 
       });
 
       if (!response.ok) {
-        const body = sanitizeErrorBody(await response.text().catch(() => ""));
+        const body = sanitizeErrorBody(
+          await readBoundedResponseText(response),
+          options.apiKey
+        );
         const suffix = body ? `: ${body}` : "";
         const error = new ApiRequestError(
           httpErrorMessage(response.status) + suffix,
           "http",
           response.status
         );
-        if (!isRetryableStatus(response.status) || attempt === maxAttempts) throw error;
+        if (!shouldRetry || !isRetryableStatus(response.status) || attempt === maxAttempts) {
+          throw error;
+        }
         lastError = error;
         console.warn(
           `[ApiClient] request failed (attempt ${attempt}/${maxAttempts}, HTTP ${response.status}); retrying`
@@ -89,7 +99,8 @@ export async function apiRequestJson<T>(options: ApiRequestOptions): Promise<T> 
 
       try {
         return (await response.json()) as T;
-      } catch {
+      } catch (error) {
+        if (signal.aborted) throw error;
         throw new ApiRequestError(
           "APIレスポンスをJSONとして解析できませんでした",
           "invalid-response"
@@ -97,7 +108,9 @@ export async function apiRequestJson<T>(options: ApiRequestOptions): Promise<T> 
       }
     } catch (error) {
       const normalized = normalizeFetchError(error, options.signal, didTimeout());
-      if (!isRetryableError(normalized) || attempt === maxAttempts) throw normalized;
+      if (!shouldRetry || !isRetryableError(normalized) || attempt === maxAttempts) {
+        throw normalized;
+      }
       lastError = normalized;
       console.warn(
         `[ApiClient] request failed (attempt ${attempt}/${maxAttempts}, ${normalized.code ?? normalized.kind}); retrying`
@@ -109,6 +122,33 @@ export async function apiRequestJson<T>(options: ApiRequestOptions): Promise<T> 
   }
 
   throw lastError ?? new ApiRequestError("APIリクエストに失敗しました", "network");
+}
+
+async function readBoundedResponseText(response: Response): Promise<string> {
+  if (!response.body) return response.text().catch(() => "");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytesRead = 0;
+  let text = "";
+
+  try {
+    while (bytesRead < MAX_ERROR_BODY_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const remaining = MAX_ERROR_BODY_BYTES - bytesRead;
+      const chunk = value.byteLength > remaining ? value.subarray(0, remaining) : value;
+      bytesRead += chunk.byteLength;
+      text += decoder.decode(chunk, { stream: bytesRead < MAX_ERROR_BODY_BYTES });
+      if (chunk.byteLength < value.byteLength) break;
+    }
+    text += decoder.decode();
+    return text;
+  } catch {
+    return text;
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
 }
 
 function combineAbortSignals(userSignal: AbortSignal | undefined, timeoutMs: number) {
@@ -188,9 +228,14 @@ async function waitBeforeRetry(
   const exponentialMs = Math.min(8_000, 500 * 2 ** (attempt - 1));
   const delayMs = retryAfterMs ?? exponentialMs + Math.floor(Math.random() * 250);
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, delayMs);
+    const cleanup = () => signal?.removeEventListener("abort", abort);
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, delayMs);
     const abort = () => {
       clearTimeout(timer);
+      cleanup();
       reject(new ApiRequestError("リクエストがキャンセルされました", "cancelled"));
     };
     if (signal?.aborted) abort();
@@ -207,8 +252,9 @@ function parseRetryAfter(value: string | null): number | undefined {
   return Math.min(Math.max(0, dateMs - Date.now()), 30_000);
 }
 
-function sanitizeErrorBody(body: string): string {
-  return body
+function sanitizeErrorBody(body: string, apiKey: string): string {
+  const keyRedacted = apiKey ? body.split(apiKey).join("[REDACTED]") : body;
+  return keyRedacted
     .replace(/Bearer\s+[A-Za-z0-9._~+/-]+/gi, "Bearer [REDACTED]")
     .replace(/sk-[A-Za-z0-9_-]+/g, "[REDACTED]")
     .replace(/\s+/g, " ")

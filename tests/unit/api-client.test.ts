@@ -75,6 +75,22 @@ describe("api-client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("does not retry POST requests unless explicitly enabled", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ ok: false, status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      apiRequestJson({
+        apiKey: "test-key",
+        baseURL: "https://api.example.com/v1",
+        path: "chat/completions",
+        method: "POST",
+        body: { messages: [] },
+      })
+    ).rejects.toMatchObject({ kind: "http", status: 503 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("distinguishes user cancellation from timeout", async () => {
     const controller = new AbortController();
     const fetchMock = vi.fn().mockImplementation(
@@ -99,5 +115,27 @@ describe("api-client", () => {
     await expect(request).rejects.toEqual(
       expect.objectContaining<ApiRequestError>({ kind: "cancelled" })
     );
+  });
+
+  it("reports a timeout independently from user cancellation", async () => {
+    const fetchMock = vi.fn().mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
+            once: true,
+          });
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      apiRequestJson({
+        apiKey: "test-key",
+        baseURL: "https://api.example.com/v1",
+        path: "models",
+        timeoutMs: 0,
+        maxAttempts: 1,
+      })
+    ).rejects.toEqual(expect.objectContaining<ApiRequestError>({ kind: "timeout" }));
   });
 });

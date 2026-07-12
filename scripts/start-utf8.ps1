@@ -8,5 +8,5 @@ $utf8 = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = $utf8
 $OutputEncoding = $utf8
 
-& npm exec electron-forge start
+& npm run start
 exit $LASTEXITCODE
