@@ -1,15 +1,18 @@
 import { FusesPlugin } from "@electron-forge/plugin-fuses";
 import { FuseV1Options, FuseVersion } from "@electron/fuses";
 import { WebpackPlugin } from "@electron-forge/plugin-webpack";
+import path from "path";
 
 import type { ForgeConfig } from "@electron-forge/shared-types";
 
 const mainConfig = require("./webpack.main.config");
 const rendererConfig = require("./webpack.renderer.config");
+const { buildMcpRuntime } = require("./scripts/copy-mcp-runtime.cjs");
 
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
+    extraResource: [path.resolve(__dirname, ".mcp-runtime")],
   },
   rebuildConfig: {},
   makers: [
@@ -31,6 +34,11 @@ const config: ForgeConfig = {
       config: {},
     },
   ],
+  hooks: {
+    generateAssets: async () => {
+      buildMcpRuntime(__dirname);
+    },
+  },
   plugins: [
     new FusesPlugin({
       version: FuseVersion.V1,

@@ -6,6 +6,7 @@ import { parseLectureOrdinal, impliesLectureContent } from "./moocs-query";
 function resolveDefaultIndexPath(): string {
   const projectRoot = path.resolve(__dirname, "..", "..");
   const candidates = [
+    path.join(__dirname, "data", "slides-index.json"),
     path.join(projectRoot, "data", "slides-index.json"),
     path.join(process.resourcesPath ?? "", "data", "slides-index.json"),
     path.resolve(__dirname, "..", "..", "data", "slides-index.json"),
@@ -28,13 +29,9 @@ export class SlidesIndexService {
     try {
       const raw = readFileSync(filePath, "utf-8");
       this.index = JSON.parse(raw) as SlidesIndex;
-      console.log(
-        `[SlidesIndex] Loaded ${this.index.entries.length} slide entries from ${filePath}`
-      );
-    } catch (err) {
-      console.warn(
-        `[SlidesIndex] Failed to load index: ${err instanceof Error ? err.message : err}`
-      );
+      console.log(`[SlidesIndex] Loaded ${this.index.entries.length} slide entries`);
+    } catch {
+      console.warn("[SlidesIndex] Failed to load index");
       this.index = null;
     }
   }
@@ -45,10 +42,16 @@ export class SlidesIndexService {
 
   /** MOOCs スライド URL に一致するインデックス本文を返す（末尾スラッシュは無視） */
   getTextByMoocsUrl(moocsUrl: string): string | null {
+    return this.getEntryByMoocsUrl(moocsUrl)?.text ?? null;
+  }
+
+  /** 資料本文に加え、科目名・講義回・資料番号を引用表示へ引き継ぐための検索。 */
+  getEntryByMoocsUrl(moocsUrl: string): SlideIndexEntry | null {
     if (!this.index?.entries?.length) return null;
     const normalized = moocsUrl.replace(/\/$/, "");
-    const entry = this.index.entries.find((e) => e.moocsUrl.replace(/\/$/, "") === normalized);
-    return entry?.text ?? null;
+    return (
+      this.index.entries.find((entry) => entry.moocsUrl.replace(/\/$/, "") === normalized) ?? null
+    );
   }
 
   matchSlides(query: string, courseCode?: string): SlideMatch[] {

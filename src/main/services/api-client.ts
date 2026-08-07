@@ -2,6 +2,7 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_ATTEMPTS = 3;
 const MAX_ERROR_BODY_CHARS = 1_000;
 const MAX_ERROR_BODY_BYTES = 4_096;
+const OFFICIAL_API_HOST = "api.openai.iniad.org";
 
 const RETRYABLE_STATUS = new Set([408, 429]);
 const RETRYABLE_NETWORK_CODES = new Set([
@@ -45,8 +46,16 @@ export function buildApiUrl(baseURL: string, path: string): string {
   const normalizedBase = baseURL.trim().replace(/\/+$/, "");
   const normalizedPath = path.replace(/^\/+/, "");
   const url = new URL(`${normalizedBase}/${normalizedPath}`);
-  if (url.protocol !== "https:" && url.protocol !== "http:") {
-    throw new ApiRequestError("API URLはHTTPまたはHTTPSで指定してください", "network");
+  if (
+    url.protocol !== "https:" ||
+    url.hostname !== OFFICIAL_API_HOST ||
+    url.username !== "" ||
+    url.password !== "" ||
+    url.port !== ""
+  ) {
+    // Enforce this again at the final Authorization-header boundary. IPC validation
+    // alone cannot protect against a legacy, corrupted, or locally modified settings file.
+    throw new ApiRequestError("API URLは公式 INIAD API の HTTPS URL のみ指定できます", "network");
   }
   return url.toString();
 }

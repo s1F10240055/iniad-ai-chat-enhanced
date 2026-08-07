@@ -1,6 +1,7 @@
 import type { McpClient } from "./mcp-client";
 import type { SlidesIndexService } from "./slides-index";
 import type { Citation } from "../../shared/types/chat";
+import type { MaterialContextInput } from "./in-memory-store";
 import {
   parseGoogleSlideExtract,
   formatSlideTextForLlm,
@@ -16,49 +17,57 @@ import { mcpResultToText, truncate, type ToolExecutionResult } from "./mcp-resul
 
 const MAX_SNAPSHOT_CHARS = 3_000;
 
+export interface MaterialToolExecutionResult extends ToolExecutionResult {
+  /** Main 内の資料コンテキストへ保存してよい、実本文を伴う資料だけを格納する。 */
+  materials?: MaterialContextInput[];
+}
+
 export class MoocsPageReader {
   constructor(
     private mcpClient: McpClient,
     private slidesIndex?: SlidesIndexService,
-    private slideReadCache?: Map<string, string>
+    private slideReadCache?: Map<string, string>,
+    private signal?: AbortSignal
   ) {}
 
-  async readPage(url?: string): Promise<ToolExecutionResult> {
+  async readPage(url?: string): Promise<MaterialToolExecutionResult> {
     return this.readSlideContent(url);
   }
 
-  async tryExtractSlideText(citations: Citation[]): Promise<ToolExecutionResult | null> {
+  async tryExtractSlideText(citations: Citation[]): Promise<MaterialToolExecutionResult | null> {
     try {
-      const result = await this.mcpClient.extractGoogleSlideText();
+      const result = await withAbort(
+        this.mcpClient.extractGoogleSlideText(this.signal),
+        this.signal
+      );
       const rawText = mcpResultToText(result);
       const parsed = parseGoogleSlideExtract(rawText);
       if (parsed?.text && isReadableSlideText(parsed.text)) {
         const moocsUrl = parsed.moocsUrl;
-        if (moocsUrl) citations.push({ title: "MOOCs スライド", url: moocsUrl });
-        return {
-          content: truncate(formatSlideTextForLlm(parsed, moocsUrl)),
-          citations,
-        };
+        if (moocsUrl) citations.push(this.buildCitation(moocsUrl, "MOOCs スライド"));
+        return this.withMaterials(truncate(formatSlideTextForLlm(parsed, moocsUrl)), citations);
       }
-    } catch {
+    } catch (error) {
+      if (this.signal?.aborted) throw error;
       // fall through to accessibility snapshot
     }
     return null;
   }
 
-  private async readSlideContent(slideUrl?: string): Promise<ToolExecutionResult> {
+  private async readSlideContent(slideUrl?: string): Promise<MaterialToolExecutionResult> {
+    throwIfAborted(this.signal);
     const moocsUrl = slideUrl;
     const citations: Citation[] = [];
 
     if (moocsUrl && this.slideReadCache?.has(moocsUrl)) {
       const cached = this.slideReadCache.get(moocsUrl)!;
-      citations.push({ title: "MOOCs スライド", url: moocsUrl });
-      return { content: cached, citations };
+      citations.push(this.buildCitation(moocsUrl, "MOOCs スライド"));
+      return this.withMaterials(cached, citations);
     }
 
     if (moocsUrl) {
-      await this.mcpClient.navigateTo(moocsUrl);
-      citations.push({ title: pageCitationTitle(moocsUrl), url: moocsUrl });
+      await withAbort(this.mcpClient.navigateTo(moocsUrl, this.signal), this.signal);
+      citations.push(this.buildCitation(moocsUrl, pageCitationTitle(moocsUrl)));
     }
 
     const pageKind = moocsUrl ? getMoocsPageKind(moocsUrl) : "other";
@@ -67,23 +76,28 @@ export class MoocsPageReader {
     }
 
     if (moocsUrl && this.slidesIndex?.isLoaded()) {
-      const indexed = this.slidesIndex.getTextByMoocsUrl(moocsUrl);
-      if (indexed) {
-        const content = truncate(`MOOCs URL: ${moocsUrl}\nSource: slides-index\n\n${indexed}`);
+      const indexedEntry = this.slidesIndex.getEntryByMoocsUrl(moocsUrl);
+      if (indexedEntry?.text) {
+        const content = truncate(
+          `MOOCs URL: ${moocsUrl}\nSource: slides-index\n\n${indexedEntry.text}`
+        );
         this.slideReadCache?.set(moocsUrl, content);
-        return { content, citations };
+        return this.withMaterials(content, citations);
       }
     }
 
-    await this.mcpClient.expandSlideTab();
-    const extractResult = await this.mcpClient.extractGoogleSlideText();
+    await withAbort(this.mcpClient.expandSlideTab(this.signal), this.signal);
+    const extractResult = await withAbort(
+      this.mcpClient.extractGoogleSlideText(this.signal),
+      this.signal
+    );
     const rawText = mcpResultToText(extractResult);
     const parsed = parseGoogleSlideExtract(rawText);
     const resolvedUrl = moocsUrl ?? parsed?.moocsUrl;
 
     // L61 で moocsUrl の citation は積み済み。抽出で新たに URL が判明した場合のみ追加（重複回避）
     if (resolvedUrl && resolvedUrl !== moocsUrl) {
-      citations.push({ title: "MOOCs スライド", url: resolvedUrl });
+      citations.push(this.buildCitation(resolvedUrl, "MOOCs スライド"));
     }
 
     if (parsed?.error === "no_google_slides_iframe") {
@@ -101,17 +115,17 @@ export class MoocsPageReader {
     if (parsed?.text && isReadableSlideText(parsed.text)) {
       const content = truncate(formatSlideTextForLlm(parsed, resolvedUrl));
       if (resolvedUrl) this.slideReadCache?.set(resolvedUrl, content);
-      return { content, citations };
+      return this.withMaterials(content, citations);
     }
 
     if (resolvedUrl && this.slidesIndex?.isLoaded()) {
-      const indexed = this.slidesIndex.getTextByMoocsUrl(resolvedUrl);
-      if (indexed) {
+      const indexedEntry = this.slidesIndex.getEntryByMoocsUrl(resolvedUrl);
+      if (indexedEntry?.text) {
         const content = truncate(
-          `MOOCs URL: ${resolvedUrl}\nSource: slides-index (fallback)\n\n${indexed}`
+          `MOOCs URL: ${resolvedUrl}\nSource: slides-index (fallback)\n\n${indexedEntry.text}`
         );
         this.slideReadCache?.set(resolvedUrl, content);
-        return { content, citations };
+        return this.withMaterials(content, citations);
       }
     }
 
@@ -130,8 +144,8 @@ export class MoocsPageReader {
     moocsUrl: string,
     pageKind: MoocsPageKind,
     citations: Citation[]
-  ): Promise<ToolExecutionResult> {
-    const snapshot = await this.mcpClient.getPageSnapshot();
+  ): Promise<MaterialToolExecutionResult> {
+    const snapshot = await withAbort(this.mcpClient.getPageSnapshot(this.signal), this.signal);
     if (!snapshot) {
       return {
         content: `Error: empty page content for ${moocsUrl} (pageKind=${pageKind})`,
@@ -150,6 +164,96 @@ export class MoocsPageReader {
 
     const content = truncate(lines.join("\n"));
     this.slideReadCache?.set(moocsUrl, content);
-    return { content, citations };
+    return this.withMaterials(content, citations, !isPrivate);
   }
+
+  private buildCitation(url: string, fallbackTitle: string): Citation {
+    const indexed = this.slidesIndex?.getEntryByMoocsUrl(url);
+    if (indexed) {
+      return {
+        title: `${indexed.courseName}: ${indexed.slideTitle}`,
+        url,
+        location: `第${formatIndexNumber(indexed.lectureNum)}回 / 資料${formatIndexNumber(indexed.slideNum)}`,
+        sourceType: "moocs",
+      };
+    }
+
+    return {
+      title: fallbackTitle,
+      url,
+      location: inferMoocsLocation(url),
+      sourceType: "moocs",
+    };
+  }
+
+  private withMaterials(
+    content: string,
+    citations: Citation[],
+    recordable = true
+  ): MaterialToolExecutionResult {
+    if (!recordable || !isRecordableMaterial(content)) return { content, citations };
+    const materials = citations.map((citation) => ({
+      title: citation.title,
+      url: citation.url,
+      location: citation.location,
+      sourceType: citation.sourceType,
+      content,
+    }));
+    return materials.length > 0 ? { content, citations, materials } : { content, citations };
+  }
+}
+
+function formatIndexNumber(value: string): string {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? String(parsed) : value;
+}
+
+function inferMoocsLocation(url: string): string | undefined {
+  try {
+    const parts = new URL(url).pathname.replace(/\/$/, "").split("/");
+    const coursesIndex = parts.indexOf("courses");
+    const lecture = coursesIndex >= 0 ? parts[coursesIndex + 3] : undefined;
+    const page = coursesIndex >= 0 ? parts[coursesIndex + 4] : undefined;
+    if (!lecture) return undefined;
+    const lectureLabel = `第${formatIndexNumber(lecture)}回`;
+    if (!page) return lectureLabel;
+    if (/^\d+$/.test(page)) return `${lectureLabel} / 資料${formatIndexNumber(page)}`;
+    if (page === "review") return `${lectureLabel} / 課題解説`;
+    if (page === "exercise") return `${lectureLabel} / 演習課題`;
+    return lectureLabel;
+  } catch {
+    return undefined;
+  }
+}
+
+function isRecordableMaterial(content: string): boolean {
+  return (
+    content.trim().length > 0 &&
+    !/^(?:Error:|Tool error:|Navigated to)/i.test(content.trim()) &&
+    !/^Status:\s*非公開/im.test(content)
+  );
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new Error("リクエストがキャンセルされました");
+}
+
+async function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  throwIfAborted(signal);
+
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new Error("リクエストがキャンセルされました"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      }
+    );
+  });
 }

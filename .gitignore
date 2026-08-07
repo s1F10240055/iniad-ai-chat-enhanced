@@ -90,6 +90,7 @@ typings/
 
 # Electron-Forge
 out/
+.mcp-runtime/
 
 # TypeScript compiled output
 dist/

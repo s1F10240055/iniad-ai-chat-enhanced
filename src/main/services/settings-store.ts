@@ -23,8 +23,16 @@ const SETTINGS_FILE = "settings.json";
 /** 機密情報（APIキー・MOOCsパスワード）の暗号化ファイル名 */
 const CREDENTIALS_FILE = "credentials.enc";
 
-/** 平文フォールバック時のプレフィックス（safeStorage が利用不可の環境向け） */
+/** 旧版が平文フォールバックで保存したファイルを検出するためのプレフィックス */
 const PLAINTEXT_PREFIX = "plaintext:";
+const OFFICIAL_API_HOST = "api.openai.iniad.org";
+const ALLOWED_MODELS = new Set(["gpt-5.4-nano", "gpt-5.4-mini", "gpt-5.4"]);
+
+/** Reject Linux's unprotected fallback in addition to unavailable safeStorage. */
+export function isSecureStorageAvailable(platform = process.platform): boolean {
+  if (!safeStorage.isEncryptionAvailable()) return false;
+  return platform !== "linux" || safeStorage.getSelectedStorageBackend() !== "basic_text";
+}
 
 /** credentials.enc に格納する機密情報の構造 */
 interface Secrets {
@@ -78,13 +86,14 @@ export class SettingsStore {
     // （一時的な書き込み失敗で既存の正常な設定をデフォルト値で上書きしないため）
     await this.migrateLegacySecrets();
     await this.ensureSettingsFile();
+    await this.migrateInsecureCredentials();
 
     // 読み込み: 失敗時はデフォルト値で起動するがファイルは上書きしない
     // （loadFromFiles は内部で破損リカバリ済み。予期せぬエラー時のみこの catch に到達）
     try {
       this.cache = await this.loadFromFiles();
-    } catch (error) {
-      console.error("Failed to load settings, using defaults:", error);
+    } catch {
+      console.error("[SettingsStore] Failed to load settings; using defaults");
       this.cache = { ...DEFAULT_SETTINGS };
     }
   }
@@ -151,8 +160,8 @@ export class SettingsStore {
         // undefined/null や未知のキーは無音でスキップ
       }
 
-      this.cache = updated;
       await this.saveAllFiles(updated);
+      this.cache = updated;
     });
 
     // キューは常に resolve させ（後続の更新を止めない）、現���の呼び出しには結果を伝播
@@ -197,6 +206,11 @@ export class SettingsStore {
     await this.saveAllFiles(this.cache);
   }
 
+  /** 初期化失敗時に、既存ファイルへ触れずセッション内だけ既定値で継続する。 */
+  useDefaultsInMemory(): void {
+    this.cache = { ...DEFAULT_SETTINGS };
+  }
+
   // ── 初期化・読み込み ──────────────────────────────
 
   /**
@@ -215,11 +229,14 @@ export class SettingsStore {
     const nonSecret = await this.loadSettingsFile();
     const secrets = await this.loadCredentialsFile();
     return {
-      apiKey: secrets.apiKey,
-      baseURL: nonSecret.baseURL ?? DEFAULT_SETTINGS.baseURL,
-      model: nonSecret.model ?? DEFAULT_SETTINGS.model,
-      moocsUsername: nonSecret.moocsUsername ?? DEFAULT_SETTINGS.moocsUsername,
-      moocsPassword: secrets.moocsPassword,
+      apiKey: sanitizeSecret(secrets.apiKey, 512),
+      baseURL: sanitizePersistedApiBaseUrl(nonSecret.baseURL),
+      model:
+        typeof nonSecret.model === "string" && ALLOWED_MODELS.has(nonSecret.model)
+          ? nonSecret.model
+          : DEFAULT_SETTINGS.model,
+      moocsUsername: sanitizePersistedUsername(nonSecret.moocsUsername),
+      moocsPassword: sanitizeSecret(secrets.moocsPassword, 4_096),
     };
   }
 
@@ -251,15 +268,12 @@ export class SettingsStore {
       const decrypted = this.decryptSecrets(content);
       const parsed = JSON.parse(decrypted) as Partial<Secrets>;
       return {
-        apiKey: parsed.apiKey ?? "",
-        moocsPassword: parsed.moocsPassword ?? "",
+        apiKey: sanitizeSecret(parsed.apiKey, 512),
+        moocsPassword: sanitizeSecret(parsed.moocsPassword, 4_096),
       };
-    } catch (error) {
+    } catch {
       // 復号失敗（破損/別PC持ち込みでDPAPI復号不可）→ .bak に退避
-      console.warn(
-        "[SettingsStore] Failed to decrypt credentials.enc, backing up. Re-enter secrets:",
-        error
-      );
+      console.warn("[SettingsStore] Credential decryption failed; re-entry is required");
       try {
         await fs.rename(this.credentialsPath, `${this.credentialsPath}.bak`);
       } catch {
@@ -285,12 +299,18 @@ export class SettingsStore {
     if (!hasLegacySecrets) return;
 
     if (!(await this.fileExists(this.credentialsPath))) {
-      // credentials.enc なし → settings.json の機密を暗号化して移行
-      await this.saveCredentialsFile({
-        apiKey: legacy.apiKey ?? "",
-        moocsPassword: legacy.moocsPassword ?? "",
-      });
-      console.log("[SettingsStore] Migrated legacy plaintext secrets to credentials.enc");
+      if (isSecureStorageAvailable()) {
+        // credentials.enc なし → settings.json の機密を暗号化して移行
+        await this.saveCredentialsFile({
+          apiKey: legacy.apiKey ?? "",
+          moocsPassword: legacy.moocsPassword ?? "",
+        });
+        console.log("[SettingsStore] Migrated legacy plaintext secrets to credentials.enc");
+      } else {
+        console.warn(
+          "[SettingsStore] Removed legacy plaintext secrets; secure storage is unavailable"
+        );
+      }
     }
     // credentials.enc が既存ならそちらを正とみなし、settings.json の機密は無視して破棄
 
@@ -334,6 +354,14 @@ export class SettingsStore {
    * credentials.enc に機密を暗号化して保存する
    */
   private async saveCredentialsFile(secrets: Secrets): Promise<void> {
+    if (!secrets.apiKey && !secrets.moocsPassword) {
+      try {
+        await fs.unlink(this.credentialsPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+      return;
+    }
     const json = JSON.stringify(secrets);
     const encrypted = this.encryptSecrets(json);
     await fs.writeFile(this.credentialsPath, encrypted, "utf-8");
@@ -344,17 +372,16 @@ export class SettingsStore {
 
   /**
    * 機密 JSON を暗号化して base64 文字列で返す
-   * safeStorage が利用不可（Linux 一部等）の場合は平文フォールバック
+   * safeStorage が利用不可の場合は秘密情報を永続化しない。
    */
   private encryptSecrets(plaintextJson: string): string {
-    if (safeStorage.isEncryptionAvailable()) {
+    if (isSecureStorageAvailable()) {
       const encrypted = safeStorage.encryptString(plaintextJson);
       return encrypted.toString("base64");
     }
-    console.warn(
-      "[SettingsStore] safeStorage unavailable. Credentials fall back to plaintext (insecure)."
+    throw new Error(
+      "OS の安全な資格情報ストレージを利用できないため、秘密情報を保存できません"
     );
-    return PLAINTEXT_PREFIX + Buffer.from(plaintextJson, "utf-8").toString("base64");
   }
 
   /**
@@ -362,10 +389,9 @@ export class SettingsStore {
    */
   private decryptSecrets(stored: string): string {
     if (stored.startsWith(PLAINTEXT_PREFIX)) {
-      const b64 = stored.slice(PLAINTEXT_PREFIX.length);
-      return Buffer.from(b64, "base64").toString("utf-8");
+      throw new Error("insecure legacy credentials require migration");
     }
-    if (!safeStorage.isEncryptionAvailable()) {
+    if (!isSecureStorageAvailable()) {
       throw new Error("safeStorage unavailable but credentials appear to be encrypted");
     }
     const buf = Buffer.from(stored, "base64");
@@ -380,6 +406,40 @@ export class SettingsStore {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * 旧版の平文フォールバックを検出し、安全に移行する。
+   * 暗号化できない環境では、平文を残さないことを優先して削除し再入力を求める。
+   */
+  private async migrateInsecureCredentials(): Promise<void> {
+    if (!(await this.fileExists(this.credentialsPath))) return;
+
+    const stored = await fs.readFile(this.credentialsPath, "utf-8");
+    if (!stored.startsWith(PLAINTEXT_PREFIX)) return;
+
+    if (!isSecureStorageAvailable()) {
+      await fs.unlink(this.credentialsPath);
+      console.warn(
+        "[SettingsStore] Removed insecure legacy credentials; secure storage is unavailable"
+      );
+      return;
+    }
+
+    try {
+      const decoded = Buffer.from(stored.slice(PLAINTEXT_PREFIX.length), "base64").toString(
+        "utf-8"
+      );
+      const parsed = JSON.parse(decoded) as Partial<Secrets>;
+      await this.saveCredentialsFile({
+        apiKey: typeof parsed.apiKey === "string" ? parsed.apiKey : "",
+        moocsPassword: typeof parsed.moocsPassword === "string" ? parsed.moocsPassword : "",
+      });
+      console.log("[SettingsStore] Migrated insecure legacy credentials to safeStorage");
+    } catch {
+      await fs.unlink(this.credentialsPath);
+      console.warn("[SettingsStore] Removed unreadable insecure legacy credentials");
     }
   }
 
@@ -405,3 +465,40 @@ export class SettingsStore {
  * ```
  */
 export const settingsStore = new SettingsStore();
+
+function sanitizePersistedApiBaseUrl(value: unknown): string {
+  if (typeof value !== "string") return DEFAULT_SETTINGS.baseURL;
+  try {
+    const parsed = new URL(value);
+    if (
+      parsed.protocol !== "https:" ||
+      parsed.hostname !== OFFICIAL_API_HOST ||
+      parsed.username ||
+      parsed.password ||
+      parsed.port ||
+      parsed.search ||
+      parsed.hash
+    ) {
+      return DEFAULT_SETTINGS.baseURL;
+    }
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    return DEFAULT_SETTINGS.baseURL;
+  }
+}
+
+function sanitizePersistedUsername(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    value.length > 320 ||
+    value.includes("\0") ||
+    /[\r\n]/.test(value)
+  ) {
+    return DEFAULT_SETTINGS.moocsUsername;
+  }
+  return value.trim();
+}
+
+function sanitizeSecret(value: unknown, maxLength: number): string {
+  return typeof value === "string" && value.length <= maxLength ? value : "";
+}

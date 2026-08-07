@@ -32,7 +32,10 @@ cd iniad-ai-chat-enhanced
 
 ```bash
 npm install
+npm exec playwright install chromium
 ```
+
+2行目は MOOCs 参照用 MCP が使う Chromium を導入します。未導入の場合、通常のAIチャットは利用できますが、MCP接続は「接続エラー」となります。
 
 ### 3. 開発サーバーを起動
 
@@ -42,6 +45,22 @@ npm start
 
 Electron ウィンドウが立ち上がれば成功です。
 
+## MCP 配布ランタイム
+
+`npm run package` は MCP 用の固定 Node.js、依存パッケージ、Playwright Chromium を
+`.mcp-runtime` として配布物へ同梱します。配布されたアプリの利用者が Node.js や
+Chrome を別途導入する必要はありません。開発・パッケージ作成前には、依存関係に
+対応する Chromium を次のコマンドで導入してください。
+
+```bash
+npm exec playwright install chromium
+```
+
+`npm run verify:mcp:packaged` は、ホスト側ではなく配布物内の Node.js、MCP、Chromium
+を使用し、配布ランタイム全体の SHA-256 照合と実際のブラウザツール起動まで検証します。
+アプリ本体も MCP 子プロセスを起動する直前に同じ照合を行い、改変を検出した場合は接続を拒否します。
+講義・スライド索引もASAR整合性検証対象のアプリ本体へ同梱され、配布版でも資料名と位置情報を利用できます。
+
 ## NPM Scripts
 
 | コマンド          | 内容                           |
@@ -49,7 +68,11 @@ Electron ウィンドウが立ち上がれば成功です。
 | `npm start`       | 開発用に Electron アプリを起動 |
 | `npm run package` | 実行可能パッケージを生成       |
 | `npm run make`    | インストーラー/配布物を生成    |
-| `npm run lint`    | Lint 実行（現在は未設定）      |
+| `npm run lint`    | ESLint による静的検査          |
+| `npm run type-check` | TypeScript の型検査             |
+| `npm test`        | Vitest のテスト実行              |
+| `npm run verify:mcp` | MCP・Playwright・必須ツールの診断 |
+| `npm run verify:mcp:packaged` | 生成済みWindows配布物のMCP診断 |
 
 ## プロジェクト構成
 

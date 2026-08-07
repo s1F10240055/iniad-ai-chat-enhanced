@@ -13,7 +13,8 @@ import type {
   AppStatus,
   PartialAppSettings,
   ConnectionTestResult,
-  McpStatus,
+  McpConnectionState,
+  MaterialContextSummary,
 } from "../shared/types";
 
 const api = {
@@ -30,6 +31,15 @@ const api = {
 
   /** 会話履歴をクリアする */
   clearHistory: (): Promise<void> => ipcRenderer.invoke("chat:clear"),
+
+  /** 現在の会話だけを終了し、資料コンテキストは保持して新しい会話を始める */
+  startNewChat: (): Promise<void> => ipcRenderer.invoke("chat:new"),
+
+  /** Main 内に保持している資料コンテキストの概要を取得する */
+  getMaterialContext: (): Promise<MaterialContextSummary[]> => ipcRenderer.invoke("context:list"),
+
+  /** 資料コンテキストだけを削除する */
+  clearMaterialContext: (): Promise<void> => ipcRenderer.invoke("context:clear"),
 
   // ── ステータス ──
   /** アプリケーションの現在の状態を取得する */
@@ -49,10 +59,17 @@ const api = {
   /** MCP サーバへの接続テスト */
   testMcpConnection: (): Promise<ConnectionTestResult> => ipcRenderer.invoke("settings:test-mcp"),
 
+  /** MCP をユーザー操作で再接続する */
+  reconnectMcp: (): Promise<ConnectionTestResult> => ipcRenderer.invoke("mcp:reconnect"),
+
+  /** 検証済みの HTTPS URL を OS の既定ブラウザーで開く */
+  openExternalUrl: (url: string): Promise<boolean> => ipcRenderer.invoke("external:open", url),
+
   // ── イベントリスナ（Main→Renderer へのプッシュ通知） ──
   /** MCP 接続状態の変更を監視する（cleanup 関数を返す） */
-  onMcpStatusChange: (callback: (status: McpStatus) => void): (() => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, status: McpStatus) => callback(status);
+  onMcpStatusChange: (callback: (status: McpConnectionState) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, status: McpConnectionState) =>
+      callback(status);
     ipcRenderer.on("mcp:status", handler);
     return () => {
       ipcRenderer.removeListener("mcp:status", handler);

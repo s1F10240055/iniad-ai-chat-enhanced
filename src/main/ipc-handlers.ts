@@ -1,230 +1,454 @@
-/**
- * IPCハンドラー登録
- *
- * RendererプロセスからのIPCリクエストを処理するハンドラーを登録する。
- *
- * チャネル:
- * - chat:send: チャットメッセージを送信（エージェント + ツール呼び出し）
- * - chat:cancel: チャット送信をキャンセル
- * - chat:list: チャット履歴を取得
- * - chat:clear: チャット履歴をクリア
- * - app:status: アプリケーションステータスを取得
- * - settings:get: 設定値を取得
- * - settings:set: 設定値を更新
- * - settings:test-api: API接続テスト
- * - settings:test-mcp: MCP接続テスト
- */
-
-import { ipcMain, BrowserWindow } from "electron";
-import { toSerializableError } from "../shared/types/errors";
-import { createAppServices } from "./services/app-services";
-import { ensureMcpConnected } from "./services/mcp-connection";
-import { settingsStore } from "./services/settings-store";
-import type { ChatTurn } from "../shared/types/chat";
-import type { McpStatus } from "../shared/types/settings";
-import type { ChatResponse } from "../shared/types/chat";
+/** Main プロセスでのみ実行する、検証済み IPC ハンドラー。 */
+import {
+  BrowserWindow,
+  ipcMain,
+  shell,
+  type IpcMainInvokeEvent,
+} from "electron";
+import { AppError, toSerializableError } from "../shared/types/errors";
+import type { ChatResponse, ChatTurn } from "../shared/types/chat";
+import type {
+  ConnectionTestResult,
+  McpConnectionState,
+} from "../shared/types/settings";
+import { validateChatInput, validateExternalUrl, validateSettingsInput } from "./ipc-validation";
 import { apiRequestJson } from "./services/api-client";
+import { createAppServices } from "./services/app-services";
+import type { MaterialContextInput } from "./services/in-memory-store";
+import {
+  disconnectMcp,
+  ensureMcpConnected,
+  type McpConnectionResult,
+} from "./services/mcp-connection";
+import { type McpClientError } from "./services/mcp-client";
+import { settingsStore } from "./services/settings-store";
 
 interface ModelsResponse {
   data?: Array<{ id?: string }>;
   error?: { message?: string };
 }
 
+export interface RegisterIpcHandlersOptions {
+  isTrustedSender: (webContentsId: number) => boolean;
+}
+
+type SecureHandler = (
+  event: IpcMainInvokeEvent,
+  ...args: unknown[]
+) => unknown | Promise<unknown>;
+
 const services = createAppServices();
 const { store, mcpClient, chatAgent } = services;
+
+let handlersRegistered = false;
 let activeController: AbortController | null = null;
+let activeChatCompletion: Promise<void> | null = null;
+let activeConnection:
+  | { controller: AbortController; promise: Promise<McpConnectionResult> }
+  | null = null;
+let removeConnectionIssueListener: (() => void) | null = null;
+let shuttingDown = false;
+let shutdownPromise: Promise<void> | null = null;
+let mcpConnectionState: McpConnectionState = { status: "disconnected" };
 
-// ── Helper: broadcast MCP status to all windows ────
+function broadcastMcpState(next: McpConnectionState): void {
+  mcpConnectionState = {
+    ...next,
+    lastConnectedAt: next.lastConnectedAt ?? mcpConnectionState.lastConnectedAt,
+  };
+  store.setMcpConnectionState(mcpConnectionState);
 
-function broadcastMcpStatus(status: McpStatus): void {
-  store.setMcpStatus(status);
   for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send("mcp:status", status);
-  }
-}
-
-// ── Error handling wrapper ──────────────────────────
-
-async function withErrorHandler<T>(
-  handler: () => Promise<T>
-): Promise<
-  { success: true; data: T } | { success: false; error: { code: string; message: string } }
-> {
-  try {
-    const data = await handler();
-    return { success: true, data };
-  } catch (error) {
-    return { success: false, error: toSerializableError(error) };
-  }
-}
-
-// ── Register IPC handlers ───────────────────────────
-
-export function registerIpcHandlers(): void {
-  // 保存済み認証情報があればバックグラウンドで MCP 接続を試みる
-  void tryAutoConnectMcp();
-
-  // ── チャット操作 ──
-
-  ipcMain.handle("chat:send", async (_event, userText: string) => {
-    if (!userText || typeof userText !== "string" || userText.trim().length === 0) {
-      throw new Error("INVALID_INPUT");
+    if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
+      win.webContents.send("mcp:status", { ...mcpConnectionState });
     }
+  }
+}
 
+function secureHandle(
+  channel: string,
+  options: RegisterIpcHandlersOptions,
+  handler: SecureHandler
+): void {
+  ipcMain.handle(channel, async (event, ...args) => {
+    assertTrustedSender(event, options);
+    return handler(event, ...args);
+  });
+}
+
+function secureNoArg(
+  channel: string,
+  options: RegisterIpcHandlersOptions,
+  handler: (event: IpcMainInvokeEvent) => unknown | Promise<unknown>
+): void {
+  secureHandle(channel, options, (event, ...args) => {
+    if (args.length !== 0) {
+      throw new AppError("INVALID_INPUT", `IPC ${channel} does not accept arguments`);
+    }
+    return handler(event);
+  });
+}
+
+function assertTrustedSender(
+  event: IpcMainInvokeEvent,
+  options: RegisterIpcHandlersOptions
+): void {
+  const isMainFrame = event.senderFrame === event.sender.mainFrame;
+  if (
+    event.sender.isDestroyed() ||
+    !isMainFrame ||
+    !options.isTrustedSender(event.sender.id)
+  ) {
+    throw new AppError("PERMISSION_DENIED", "この IPC 呼び出しは許可されていません");
+  }
+}
+
+export function registerIpcHandlers(options: RegisterIpcHandlersOptions): void {
+  if (handlersRegistered) return;
+  handlersRegistered = true;
+
+  removeConnectionIssueListener = mcpClient.onConnectionIssue((error) => {
+    handleMcpConnectionIssue(error);
+  });
+
+  secureHandle("chat:send", options, async (_event, rawText) => {
+    const userText = validateChatInput(rawText);
     if (activeController) {
-      throw new Error("CHAT_IN_PROGRESS");
+      throw new AppError("INVALID_INPUT", "別の回答を生成中です");
     }
 
-    const settings = settingsStore.getRawSettings();
-    activeController = new AbortController();
+    const controller = new AbortController();
+    activeController = controller;
+    const task = runChat(userText, controller);
+    const completion = task.then(
+      () => undefined,
+      () => undefined
+    );
+    activeChatCompletion = completion;
 
     try {
-      const userMessage: ChatTurn = {
-        id: `msg_${Date.now()}_user`,
-        role: "user",
-        content: userText,
-        timestamp: new Date().toISOString(),
-      };
-      store.addMessage(userMessage);
-
-      // MOOCs 検索のため、未接続時は認証情報があれば自動接続を試みる
-      if (mcpClient.getStatus() !== "connected" && settingsStore.hasMoocsCredentials()) {
-        const connectResult = await ensureMcpConnected(mcpClient, broadcastMcpStatus, settings);
-        if (!connectResult.connected) {
-          console.warn("[chat:send] MCP auto-connect failed:", connectResult.error);
-        }
-      }
-
-      const response: ChatResponse = await chatAgent.chat(
-        userText,
-        settings,
-        activeController.signal,
-        store.getHistory()
-      );
-
-      const assistantMessage: ChatTurn = {
-        id: `msg_${Date.now()}_ai`,
-        role: "assistant",
-        content: response.content,
-        citations: response.citations,
-        timestamp: new Date().toISOString(),
-      };
-      store.addMessage(assistantMessage);
-
-      return response;
-    } catch (error) {
-      const serialized = toSerializableError(error);
-      throw new Error(serialized.message);
+      return await task;
     } finally {
-      activeController = null;
+      if (activeController === controller) activeController = null;
+      if (activeChatCompletion === completion) activeChatCompletion = null;
     }
   });
 
-  ipcMain.handle("chat:cancel", async () => {
-    return withErrorHandler(async () => {
-      activeController?.abort();
-      activeController = null;
-    });
+  secureNoArg("chat:cancel", options, async () => {
+    await cancelActiveChat();
   });
 
-  ipcMain.handle("chat:list", async () => {
-    return withErrorHandler(async () => {
-      return store.getHistory();
-    });
+  secureNoArg("chat:list", options, async () => store.getHistory());
+
+  secureNoArg("chat:new", options, async () => {
+    await cancelActiveChat();
+    store.clearConversationHistory();
   });
 
-  ipcMain.handle("chat:clear", async () => {
-    return withErrorHandler(async () => {
-      store.clearHistory();
-    });
+  secureNoArg("chat:clear", options, async () => {
+    await cancelActiveChat();
+    store.clearConversationHistory();
   });
 
-  // ── ステータス ──
+  secureNoArg("context:list", options, async () => store.getMaterialSummaries());
 
-  ipcMain.handle("app:status", async () => {
+  secureNoArg("context:clear", options, async () => {
+    await cancelActiveChat();
+    store.clearMaterialContext();
+  });
+
+  secureNoArg("app:status", options, async () => {
     const settings = settingsStore.getRawSettings();
     store.setModel(settings.model);
     store.setHasApiKey(settingsStore.hasApiKey());
-    return store.getAppStatus();
+    return {
+      ...store.getAppStatus(),
+      mcpStatus: mcpConnectionState.status,
+      mcpConnection: { ...mcpConnectionState },
+    };
   });
 
-  // ── 設定 ──
+  secureNoArg("settings:get", options, async () => settingsStore.getSettings());
 
-  ipcMain.handle("settings:get", async () => {
-    return settingsStore.getSettings();
-  });
-
-  ipcMain.handle("settings:set", async (_event, partial: Record<string, string>) => {
+  secureHandle("settings:set", options, async (_event, rawSettings) => {
+    const partial = validateSettingsInput(rawSettings);
     await settingsStore.updateSettings(partial);
+
+    if (partial.model) store.setModel(partial.model);
+    store.setHasApiKey(settingsStore.hasApiKey());
+
+    if ("moocsUsername" in partial || "moocsPassword" in partial) {
+      void reconnectAfterCredentialChange();
+    }
   });
 
-  ipcMain.handle("settings:test-api", async () => {
-    const settings = settingsStore.getRawSettings();
-    if (!settings.apiKey) {
-      return { success: false, error: "API キーが設定されていません" };
-    }
+  secureNoArg("settings:test-api", options, async () => testApiConnection());
 
+  secureNoArg("settings:test-mcp", options, async () => {
+    return toConnectionTestResult(await connectMcp());
+  });
+
+  secureNoArg("mcp:reconnect", options, async () => {
+    return toConnectionTestResult(await reconnectMcp());
+  });
+
+  secureHandle("external:open", options, async (_event, rawUrl) => {
+    const url = validateExternalUrl(rawUrl);
     try {
-      const data = await apiRequestJson<ModelsResponse>({
-        apiKey: settings.apiKey,
-        baseURL: settings.baseURL,
-        path: "models",
-        timeoutMs: 10_000,
-        maxAttempts: 2,
-      });
-      if (data.error) {
-        return { success: false, error: data.error.message || "認証エラー" };
-      }
-      if (!data.data || !Array.isArray(data.data)) {
-        return { success: false, error: "APIレスポンスが不正です" };
-      }
-
-      const modelIds = data.data
-        .map((model) => model.id)
-        .filter((id): id is string => typeof id === "string");
-      if (modelIds.length !== data.data.length) {
-        return { success: false, error: "APIレスポンスが不正です" };
-      }
-      if (!modelIds.includes(settings.model)) {
-        return {
-          success: false,
-          error: `APIには接続できましたが、モデル ${settings.model} は利用可能一覧にありません`,
-        };
-      }
-
-      return { success: true };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { success: false, error: message };
+      await shell.openExternal(url, { activate: true });
+      return true;
+    } catch {
+      return false;
     }
   });
 
-  ipcMain.handle("settings:test-mcp", async () => {
-    const settings = settingsStore.getRawSettings();
-    if (!settings.moocsUsername || !settings.moocsPassword) {
-      return { success: false, error: "MOOCs 認証情報が設定されていません" };
+  // UI の描画や操作を待たず、起動直後にバックグラウンド接続を始める。
+  void tryAutoConnectMcp();
+}
+
+async function runChat(userText: string, controller: AbortController): Promise<ChatResponse> {
+  const settings = settingsStore.getRawSettings();
+  const userMessage: ChatTurn = {
+    id: `msg_${Date.now()}_user`,
+    role: "user",
+    content: userText,
+    timestamp: new Date().toISOString(),
+  };
+
+  try {
+    const shouldTryMcp =
+      mcpClient.getStatus() !== "connected" &&
+      settingsStore.hasMoocsCredentials() &&
+      (mcpConnectionState.status !== "error" || mcpConnectionState.error?.retryable !== false);
+    if (shouldTryMcp) {
+      const result = await connectMcp(controller.signal);
+      if (!result.connected) {
+        console.warn(
+          `[McpConnection] Chat fallback after ${result.state.error?.code ?? "connection failure"}`
+        );
+      }
     }
 
-    const result = await ensureMcpConnected(mcpClient, broadcastMcpStatus, settings);
+    if (controller.signal.aborted) {
+      throw new AppError("CHAT_CANCELLED", "リクエストがキャンセルされました");
+    }
 
-    return result.connected
-      ? { success: true }
-      : { success: false, error: result.error ?? "MCP接続に失敗しました" };
+    const priorMaterials = store.selectRelevantMaterials(userText);
+    const retrievedMaterials: MaterialContextInput[] = [];
+    const response = await chatAgent.chat(
+      userText,
+      settings,
+      controller.signal,
+      [...store.getHistory(), userMessage],
+      {
+        priorMaterials,
+        onMaterialsRetrieved: (materials) => {
+          retrievedMaterials.push(...materials);
+        },
+      }
+    );
+
+    // A dependency may resolve after cancellation instead of rejecting. Never
+    // repopulate history/material state after new-chat, clear, or cancel returned.
+    if (controller.signal.aborted) {
+      throw new AppError("CHAT_CANCELLED", "リクエストがキャンセルされました");
+    }
+
+    store.markMaterialsReferenced(priorMaterials.map((material) => material.id));
+    store.addMaterials(retrievedMaterials);
+
+    const assistantMessage: ChatTurn = {
+      id: `msg_${Date.now()}_ai`,
+      role: "assistant",
+      content: response.content,
+      citations: response.citations,
+      timestamp: new Date().toISOString(),
+    };
+    // 未確定ターンを先に履歴へ入れない。失敗時のrollbackで上限履歴を失わないため、
+    // user/assistant は回答確定後にまとめてcommitする。
+    store.addMessage(userMessage);
+    store.addMessage(assistantMessage);
+    return response;
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new AppError("CHAT_CANCELLED", "リクエストがキャンセルされました");
+    }
+    const serialized = toSerializableError(error);
+    throw new AppError(serialized.code, serialized.message);
+  }
+}
+
+async function cancelActiveChat(): Promise<void> {
+  const controller = activeController;
+  const completion = activeChatCompletion;
+  controller?.abort();
+  if (completion) await waitAtMost(completion, 5_000);
+}
+
+async function connectMcp(signal?: AbortSignal): Promise<McpConnectionResult> {
+  if (shuttingDown) {
+    const state: McpConnectionState = {
+      status: "disconnected",
+      lastConnectedAt: mcpConnectionState.lastConnectedAt,
+    };
+    return { connected: false, state };
+  }
+  if (signal?.aborted) throw chatCancelledError();
+  if (activeConnection) return waitForConnection(activeConnection.promise, signal);
+
+  const controller = new AbortController();
+  const promise = ensureMcpConnected(
+    mcpClient,
+    broadcastMcpState,
+    settingsStore.getRawSettings(),
+    { signal: controller.signal }
+  ).finally(() => {
+    if (activeConnection?.controller === controller) activeConnection = null;
   });
+  activeConnection = { controller, promise };
+  return waitForConnection(promise, signal);
+}
+
+async function reconnectMcp(): Promise<McpConnectionResult> {
+  const previousConnection = activeConnection;
+  previousConnection?.controller.abort();
+  await disconnectMcp(mcpClient, broadcastMcpState);
+  if (activeConnection === previousConnection) activeConnection = null;
+  return connectMcp();
+}
+
+function waitForConnection(
+  promise: Promise<McpConnectionResult>,
+  signal?: AbortSignal
+): Promise<McpConnectionResult> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(chatCancelledError());
+
+  return new Promise<McpConnectionResult>((resolve, reject) => {
+    const onAbort = () => reject(chatCancelledError());
+    signal.addEventListener("abort", onAbort, { once: true });
+    void promise.then(resolve, reject).finally(() => {
+      signal.removeEventListener("abort", onAbort);
+    });
+  });
+}
+
+function chatCancelledError(): AppError {
+  return new AppError("CHAT_CANCELLED", "リクエストがキャンセルされました");
+}
+
+async function reconnectAfterCredentialChange(): Promise<void> {
+  if (shuttingDown) return;
+  const result = await reconnectMcp();
+  if (!result.connected) {
+    console.warn(
+      `[McpConnection] Credential update reconnect failed: ${result.state.error?.code ?? "unknown"}`
+    );
+  }
+}
+
+function handleMcpConnectionIssue(error: McpClientError): void {
+  if (shuttingDown) return;
+  broadcastMcpState({
+    status: "error",
+    lastConnectedAt: mcpConnectionState.lastConnectedAt,
+    error: {
+      code: error.code,
+      message: error.message,
+      guidance: error.guidance,
+      retryable: error.retryable,
+    },
+  });
+
+  if (error.retryable) void connectMcp();
 }
 
 async function tryAutoConnectMcp(): Promise<void> {
   if (!settingsStore.hasMoocsCredentials()) return;
-  if (mcpClient.getStatus() === "connected") return;
-
-  const settings = settingsStore.getRawSettings();
-  const result = await ensureMcpConnected(mcpClient, broadcastMcpStatus, settings);
-
+  const result = await connectMcp();
   if (result.connected) {
-    console.log("[McpConnection] Auto-connected on startup");
+    console.log("[McpConnection] Startup connection established");
   } else {
-    console.warn("[McpConnection] Auto-connect on startup failed:", result.error);
+    console.warn(
+      `[McpConnection] Startup connection failed: ${result.state.error?.code ?? "unknown"}`
+    );
   }
+}
+
+function toConnectionTestResult(result: McpConnectionResult): ConnectionTestResult {
+  return result.connected
+    ? { success: true }
+    : {
+        success: false,
+        error: result.state.error?.message ?? result.error ?? "MCP接続に失敗しました",
+        guidance: result.state.error?.guidance,
+      };
+}
+
+async function testApiConnection(): Promise<ConnectionTestResult> {
+  const settings = settingsStore.getRawSettings();
+  if (!settings.apiKey) {
+    return { success: false, error: "API キーが設定されていません" };
+  }
+
+  try {
+    const data = await apiRequestJson<ModelsResponse>({
+      apiKey: settings.apiKey,
+      baseURL: settings.baseURL,
+      path: "models",
+      timeoutMs: 10_000,
+      maxAttempts: 2,
+    });
+    if (data.error) {
+      return { success: false, error: data.error.message || "認証エラー" };
+    }
+    if (!data.data || !Array.isArray(data.data)) {
+      return { success: false, error: "APIレスポンスが不正です" };
+    }
+
+    const modelIds = data.data
+      .map((model) => model.id)
+      .filter((id): id is string => typeof id === "string");
+    if (modelIds.length !== data.data.length) {
+      return { success: false, error: "APIレスポンスが不正です" };
+    }
+    if (!modelIds.includes(settings.model)) {
+      return {
+        success: false,
+        error: `APIには接続できましたが、モデル ${settings.model} は利用可能一覧にありません`,
+      };
+    }
+    return { success: true };
+  } catch (error) {
+    const serialized = toSerializableError(error);
+    return { success: false, error: serialized.message };
+  }
+}
+
+export function shutdownIpcServices(): Promise<void> {
+  if (shutdownPromise) return shutdownPromise;
+  shuttingDown = true;
+  removeConnectionIssueListener?.();
+  removeConnectionIssueListener = null;
+
+  shutdownPromise = (async () => {
+    activeConnection?.controller.abort();
+    await cancelActiveChat();
+    if (activeConnection) await waitAtMost(activeConnection.promise, 5_000);
+    await waitAtMost(disconnectMcp(mcpClient, broadcastMcpState), 5_000);
+  })();
+  return shutdownPromise;
+}
+
+async function waitAtMost(promise: Promise<unknown>, timeoutMs: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    promise.then(() => undefined, () => undefined),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, timeoutMs);
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
 }
 
 export const testExports = {

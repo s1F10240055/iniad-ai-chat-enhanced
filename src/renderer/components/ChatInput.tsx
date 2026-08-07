@@ -1,11 +1,20 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 
 interface ChatInputProps {
-  onSend: (text: string) => void;
+  onSend: (text: string) => void | Promise<void>;
+  onCancel?: () => void | Promise<void>;
   disabled?: boolean;
+  isLoading?: boolean;
+  isCancelling?: boolean;
 }
 
-export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
+export const ChatInput: React.FC<ChatInputProps> = ({
+  onSend,
+  onCancel,
+  disabled = false,
+  isLoading = false,
+  isCancelling = false,
+}) => {
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const historyRef = useRef<string[]>([]);
@@ -22,8 +31,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
   const handleSubmit = useCallback(
     (e?: React.SyntheticEvent) => {
       e?.preventDefault();
-      if (text.trim() && !disabled) {
-        onSend(text.trim());
+      if (text.trim() && !disabled && !isLoading) {
+        void onSend(text.trim());
         historyRef.current = [...historyRef.current, text.trim()];
         historyIndexRef.current = -1;
         draftRef.current = "";
@@ -33,7 +42,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
         }
       }
     },
-    [text, disabled, onSend]
+    [text, disabled, isLoading, onSend]
   );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -87,12 +96,24 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
           onKeyDown={handleKeyDown}
           placeholder="質問を入力... (Enterで送信, Shift+Enterで改行, ↑で履歴)"
           aria-label="Chat message input"
-          disabled={disabled}
+          disabled={disabled || isLoading}
           rows={1}
         />
-        <button type="submit" className="chat-input-button" disabled={disabled || !text.trim()}>
-          送信
-        </button>
+        {isLoading ? (
+          <button
+            type="button"
+            className="chat-input-button chat-cancel-button"
+            onClick={() => void onCancel?.()}
+            disabled={isCancelling || !onCancel}
+            aria-label="回答生成をキャンセル"
+          >
+            {isCancelling ? "キャンセル中..." : "キャンセル"}
+          </button>
+        ) : (
+          <button type="submit" className="chat-input-button" disabled={disabled || !text.trim()}>
+            送信
+          </button>
+        )}
       </form>
     </div>
   );

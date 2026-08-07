@@ -3,6 +3,8 @@
  * SettingsStore と設定画面で使用する型
  */
 
+import type { ErrorCode } from "./errors";
+
 /** アプリケーション設定（保存用・生の値） */
 export interface AppSettings {
   /** INIAD API キー（Renderer には送信しない） */
@@ -51,12 +53,36 @@ export const DEFAULT_SETTINGS: AppSettings = {
 };
 
 /** MCP 接続状態 */
-export type McpStatus = "connected" | "disconnected" | "connecting";
+export type McpStatus =
+  | "disconnected"
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "error";
+
+/** Renderer に公開してよい、サニタイズ済みの MCP エラー情報 */
+export interface McpConnectionError {
+  code: ErrorCode;
+  message: string;
+  guidance: string;
+  retryable: boolean;
+}
+
+/** Main が一元管理する MCP 接続スナップショット */
+export interface McpConnectionState {
+  status: McpStatus;
+  lastConnectedAt?: string;
+  error?: McpConnectionError;
+  attempt?: number;
+  maxAttempts?: number;
+}
 
 /** アプリケーション全体のステータス（app:status で返却） */
 export interface AppStatus {
   /** MCP 接続状態 */
   mcpStatus: McpStatus;
+  /** 詳細な MCP 接続状態 */
+  mcpConnection: McpConnectionState;
   /** 現在使用中のモデル名 */
   model: string;
   /** API キーが設定済みか */
@@ -70,4 +96,5 @@ export type PartialAppSettings = Partial<AppSettings>;
 export interface ConnectionTestResult {
   success: boolean;
   error?: string;
+  guidance?: string;
 }

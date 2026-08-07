@@ -11,13 +11,17 @@ vi.mock("electron", () => ({
   app: { getPath: vi.fn(() => tmpdir()) },
   safeStorage: {
     isEncryptionAvailable: vi.fn(),
+    getSelectedStorageBackend: vi.fn(),
     encryptString: vi.fn(),
     decryptString: vi.fn(),
   },
 }));
 
 import { safeStorage } from "electron";
-import { SettingsStore } from "../../src/main/services/settings-store";
+import {
+  SettingsStore,
+  isSecureStorageAvailable,
+} from "../../src/main/services/settings-store";
 
 /** ファイルの存在チェック */
 async function exists(p: string): Promise<boolean> {
@@ -37,6 +41,7 @@ describe("SettingsStore", () => {
   beforeEach(async () => {
     // safeStorage モック: 可用性チェックを通過した場合のみ成功（実装の呼び分けを検証）
     vi.mocked(safeStorage.isEncryptionAvailable).mockReturnValue(true);
+    vi.mocked(safeStorage.getSelectedStorageBackend).mockReturnValue("kwallet");
     vi.mocked(safeStorage.encryptString).mockImplementation((s: string) => {
       if (!safeStorage.isEncryptionAvailable()) throw new Error("safeStorage unavailable");
       return Buffer.from(s, "utf-8");
@@ -139,6 +144,28 @@ describe("SettingsStore", () => {
     expect(parsed).toHaveProperty("moocsUsername");
   });
 
+  it("再読込時に非公式API URL・未知モデル・不正なユーザー名を既定値へ戻す", async () => {
+    await fs.writeFile(
+      tempPath,
+      JSON.stringify({
+        baseURL: "http://attacker.example/v1",
+        model: "unknown-model",
+        moocsUsername: "student\nInjected",
+      }),
+      "utf-8"
+    );
+
+    const reloaded = new SettingsStore();
+    await reloaded.init(tempPath);
+    expect(reloaded.getRawSettings()).toEqual(
+      expect.objectContaining({
+        baseURL: "https://api.openai.iniad.org/api/v1",
+        model: "gpt-5.4-nano",
+        moocsUsername: "",
+      })
+    );
+  });
+
   it("旧形式（平文 settings.json に機密含む）から credentials.enc に自動移行する", async () => {
     // init が作ったファイルを一旦削除し、旧形式の平文 settings.json を置く
     await fs.unlink(tempPath);
@@ -159,7 +186,7 @@ describe("SettingsStore", () => {
     expect(migrated.getRawSettings().apiKey).toBe("legacy-key");
     expect(migrated.getRawSettings().moocsPassword).toBe("legacy-pass");
     // 非機密も保持
-    expect(migrated.getRawSettings().baseURL).toBe("https://legacy.example.com/v1");
+    expect(migrated.getRawSettings().baseURL).toBe("https://api.openai.iniad.org/api/v1");
     expect(migrated.getRawSettings().moocsUsername).toBe("legacy-user");
 
     // settings.json から機密が削除されている
@@ -226,19 +253,47 @@ describe("SettingsStore", () => {
     expect(await exists(`${credPath}.bak`)).toBe(true);
   });
 
-  it("safeStorage が利用不可の場合は平文フォールバックで保存・復元できる", async () => {
-    // このテストの冒頭で可用性を切る（実装が可用性をチェックせず encryptString を
-    // 盲目的に呼ぶと、モックが throw するのでテストが失敗す���）
+  it("safeStorage が利用不可の場合は秘密情報を平文保存しない", async () => {
     vi.mocked(safeStorage.isEncryptionAvailable).mockReturnValue(false);
 
     const fallback = new SettingsStore();
     await fallback.init(tempPath);
-    await fallback.updateSettings({ apiKey: "sk-fallback", moocsPassword: "fallback-pass" });
+    await expect(
+      fallback.updateSettings({ apiKey: "sk-fallback", moocsPassword: "fallback-pass" })
+    ).rejects.toThrow("安全な資格情報ストレージ");
+    expect(await exists(credPath)).toBe(false);
+    expect(fallback.getRawSettings().apiKey).toBe("");
+    expect(fallback.getRawSettings().moocsPassword).toBe("");
+  });
 
-    // 再読込でも復元できる（平文フォールバック経由）
-    const reloaded = new SettingsStore();
-    await reloaded.init(tempPath);
-    expect(reloaded.getRawSettings().apiKey).toBe("sk-fallback");
-    expect(reloaded.getRawSettings().moocsPassword).toBe("fallback-pass");
+  it("Linux の basic_text バックエンドを安全な保存先として扱わない", () => {
+    vi.mocked(safeStorage.getSelectedStorageBackend).mockReturnValue("basic_text");
+    expect(isSecureStorageAvailable("linux")).toBe(false);
+  });
+
+  it("旧版の平文フォールバックは safeStorage で暗号化し直す", async () => {
+    const plaintext = JSON.stringify({ apiKey: "legacy-key", moocsPassword: "legacy-pass" });
+    await fs.writeFile(credPath, `plaintext:${Buffer.from(plaintext).toString("base64")}`, "utf-8");
+
+    const migrated = new SettingsStore();
+    await migrated.init(tempPath);
+
+    expect(migrated.getRawSettings().apiKey).toBe("legacy-key");
+    const stored = await fs.readFile(credPath, "utf-8");
+    expect(stored).not.toContain("plaintext:");
+    expect(stored).not.toContain("legacy-key");
+  });
+
+  it("暗号化できない環境では旧版の平文資格情報を残さない", async () => {
+    const plaintext = JSON.stringify({ apiKey: "legacy-key", moocsPassword: "legacy-pass" });
+    await fs.writeFile(credPath, `plaintext:${Buffer.from(plaintext).toString("base64")}`, "utf-8");
+    vi.mocked(safeStorage.isEncryptionAvailable).mockReturnValue(false);
+
+    const migrated = new SettingsStore();
+    await migrated.init(tempPath);
+
+    expect(migrated.getRawSettings().apiKey).toBe("");
+    expect(migrated.getRawSettings().moocsPassword).toBe("");
+    expect(await exists(credPath)).toBe(false);
   });
 });

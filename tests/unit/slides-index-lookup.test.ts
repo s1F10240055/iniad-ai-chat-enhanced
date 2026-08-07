@@ -34,6 +34,16 @@ describe("SlidesIndexService.getTextByMoocsUrl", () => {
     expect(service.getTextByMoocsUrl("https://moocs.iniad.org/courses/2026/COS201/01/01/")).toBe(
       "C言語の本文"
     );
-    expect(service.getTextByMoocsUrl("https://moocs.iniad.org/courses/2026/COS201/01/02")).toBeNull();
+    expect(
+      service.getTextByMoocsUrl("https://moocs.iniad.org/courses/2026/COS201/01/02")
+    ).toBeNull();
+    expect(
+      service.getEntryByMoocsUrl("https://moocs.iniad.org/courses/2026/COS201/01/01/")
+    ).toMatchObject({
+      courseName: "プログラミング言語",
+      lectureNum: "01",
+      slideNum: "01",
+      slideTitle: "1. C言語の光と影",
+    });
   });
 });

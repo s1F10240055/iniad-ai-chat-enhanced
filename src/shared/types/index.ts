@@ -2,7 +2,13 @@
  * 共通型定義の barrel export
  * すべての型を1箇所から import 可能にする
  */
-export type { ChatTurn, Citation, ChatResponse, ChatCompletionResponse } from "./chat";
+export type {
+  ChatTurn,
+  Citation,
+  ChatResponse,
+  ChatCompletionResponse,
+  MaterialContextSummary,
+} from "./chat";
 
 export type {
   AppSettings,
@@ -10,6 +16,8 @@ export type {
   PartialAppSettings,
   AppStatus,
   McpStatus,
+  McpConnectionState,
+  McpConnectionError,
   ConnectionTestResult,
 } from "./settings";
 

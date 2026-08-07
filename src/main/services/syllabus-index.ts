@@ -13,6 +13,8 @@ function resolveDefaultIndexPath(): string {
   const projectRoot = path.resolve(__dirname, "..", "..");
 
   const candidates = [
+    // webpack がアプリ本体（ASAR整合性検証対象）へ同梱する索引
+    path.join(__dirname, "data", "syllabus-index.json"),
     // 開発時: プロジェクトルート/data
     path.join(projectRoot, "data", "syllabus-index.json"),
     // ビルド時: Electron resourcesPath/data
@@ -38,11 +40,9 @@ export class SyllabusIndexService {
     try {
       const raw = readFileSync(filePath, "utf-8");
       this.index = JSON.parse(raw) as SyllabusIndex;
-      console.log(`[SyllabusIndex] Loaded ${this.index.courses.length} courses from ${filePath}`);
-    } catch (err) {
-      console.warn(
-        `[SyllabusIndex] Failed to load index: ${err instanceof Error ? err.message : err}`
-      );
+      console.log(`[SyllabusIndex] Loaded ${this.index.courses.length} courses`);
+    } catch {
+      console.warn("[SyllabusIndex] Failed to load index");
       this.index = null;
     }
   }

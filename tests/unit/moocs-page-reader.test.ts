@@ -34,7 +34,7 @@ describe("MoocsPageReader", () => {
 
     const result = await reader.readPage(REVIEW_URL);
 
-    expect(mcpClient.navigateTo).toHaveBeenCalledWith(REVIEW_URL);
+    expect(mcpClient.navigateTo).toHaveBeenCalledWith(REVIEW_URL, undefined);
     expect(mcpClient.extractGoogleSlideText).not.toHaveBeenCalled();
     expect(result.content).toContain("Page kind: review");
     expect(result.content).toContain("非公開");
@@ -45,23 +45,43 @@ describe("MoocsPageReader", () => {
     const mcpClient = createMcpMock();
     const slidesIndex = {
       isLoaded: vi.fn().mockReturnValue(true),
-      getTextByMoocsUrl: vi.fn().mockReturnValue("indexed slide text"),
+      getEntryByMoocsUrl: vi.fn().mockReturnValue({
+        courseCode: "COS201",
+        courseName: "プログラミング言語",
+        lectureNum: "01",
+        slideNum: "01",
+        slideTitle: "C言語の光と影",
+        moocsUrl: SLIDE_URL,
+        text: "indexed slide text",
+        keywords: [],
+      }),
     } as unknown as SlidesIndexService;
 
     const reader = new MoocsPageReader(mcpClient, slidesIndex);
     const result = await reader.readPage(SLIDE_URL);
 
-    expect(slidesIndex.getTextByMoocsUrl).toHaveBeenCalledWith(SLIDE_URL);
+    expect(slidesIndex.getEntryByMoocsUrl).toHaveBeenCalledWith(SLIDE_URL);
     expect(mcpClient.extractGoogleSlideText).not.toHaveBeenCalled();
     expect(result.content).toContain("slides-index");
     expect(result.content).toContain("indexed slide text");
+    expect(result.citations[0]).toMatchObject({
+      title: "プログラミング言語: C言語の光と影",
+      location: "第1回 / 資料1",
+      sourceType: "moocs",
+    });
+    expect(result.materials).toEqual([
+      expect.objectContaining({
+        url: SLIDE_URL,
+        content: expect.stringContaining("indexed slide text"),
+      }),
+    ]);
   });
 
   it("extracts Google slide text when index has no entry", async () => {
     const mcpClient = createMcpMock();
     const slidesIndex = {
       isLoaded: vi.fn().mockReturnValue(true),
-      getTextByMoocsUrl: vi.fn().mockReturnValue(null),
+      getEntryByMoocsUrl: vi.fn().mockReturnValue(null),
     } as unknown as SlidesIndexService;
 
     const reader = new MoocsPageReader(mcpClient, slidesIndex);

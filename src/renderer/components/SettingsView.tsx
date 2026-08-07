@@ -33,7 +33,13 @@ const AVAILABLE_MODELS = [
 function isValidURL(url: string): boolean {
   try {
     const parsed = new URL(url);
-    return parsed.protocol === "https:" || parsed.protocol === "http:";
+    return (
+      parsed.protocol === "https:" &&
+      parsed.hostname === "api.openai.iniad.org" &&
+      !parsed.username &&
+      !parsed.password &&
+      !parsed.port
+    );
   } catch {
     return false;
   }
@@ -87,7 +93,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
 
       // ベースURL
       if (current.baseURL && !isValidURL(current.baseURL)) {
-        errs.baseURL = "有効なURL形式で入力してください";
+        errs.baseURL = "公式 INIAD API の HTTPS URL を入力してください";
       }
 
       // モデル
