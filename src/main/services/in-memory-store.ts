@@ -42,7 +42,7 @@ export const MATERIAL_CONTEXT_LIMITS = {
   maxSelectedCharsPerEntry: 1_800,
 } as const;
 
-const MATERIAL_METADATA_LIMITS = {
+export const MATERIAL_METADATA_LIMITS = {
   maxTitleChars: 300,
   maxLocationChars: 200,
   maxUrlChars: 2_048,
@@ -200,11 +200,6 @@ export class InMemoryStore {
     return [...this.materialContext].reverse().map(toMaterialSummary);
   }
 
-  /** IPC 側から意図が読み取りやすい短い別名。 */
-  getMaterialSummaries(): MaterialContextSummary[] {
-    return this.getMaterialContextSummaries();
-  }
-
   getMaterialContextCount(): number {
     return this.materialContext.length;
   }
@@ -224,7 +219,10 @@ export class InMemoryStore {
 
   setMcpStatus(status: McpStatus): void {
     this.mcpStatus = status;
-    this.mcpConnection = { ...this.mcpConnection, status };
+    this.mcpConnection =
+      status === "connected"
+        ? { status, lastConnectedAt: this.mcpConnection.lastConnectedAt }
+        : { ...this.mcpConnection, status };
   }
 
   getMcpConnectionState(): McpConnectionState {
@@ -332,7 +330,7 @@ function cropAroundFirstToken(content: string, tokens: string[], maxChars: numbe
   return content.slice(start, start + maxChars);
 }
 
-function normalizeMaterialUrl(url: string): string | null {
+export function normalizeMaterialUrl(url: string): string | null {
   if (url.length === 0 || url.length > MATERIAL_METADATA_LIMITS.maxUrlChars) return null;
   try {
     const parsed = new URL(url);

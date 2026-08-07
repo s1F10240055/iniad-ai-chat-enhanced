@@ -35,43 +35,83 @@ function isAllowedMcpBrowserUrl(rawUrl) {
   );
 }
 
+async function applyNetworkPolicyToContext(context) {
+  try {
+    await context.route("**/*", (route) =>
+      isAllowedMcpBrowserUrl(route.request().url())
+        ? route.continue()
+        : route.abort("blockedbyclient")
+    );
+    if (typeof context.routeWebSocket !== "function") {
+      throw new Error("Playwright WebSocket routing is required by the MCP network policy");
+    }
+    await context.routeWebSocket("**/*", async (webSocket) => {
+      if (isAllowedMcpBrowserUrl(webSocket.url())) {
+        webSocket.connectToServer();
+        return;
+      }
+      await webSocket.close({ code: 1008, reason: "Blocked by MCP network policy" });
+    });
+    return context;
+  } catch (error) {
+    await context.close().catch(() => undefined);
+    throw error;
+  }
+}
+
+async function applyNetworkPolicyToBrowser(browser) {
+  if (browser.__iniadNetworkPolicyInstalled) return browser;
+
+  const originalNewContext = browser.newContext.bind(browser);
+  Object.defineProperty(browser, "__iniadNetworkPolicyInstalled", {
+    value: true,
+    enumerable: false,
+  });
+  browser.newContext = async (options = {}) => {
+    const context = await originalNewContext({
+      ...options,
+      serviceWorkers: "block",
+    });
+    return applyNetworkPolicyToContext(context);
+  };
+
+  try {
+    for (const context of browser.contexts?.() ?? []) {
+      await applyNetworkPolicyToContext(context);
+    }
+    return browser;
+  } catch (error) {
+    await browser.close().catch(() => undefined);
+    throw error;
+  }
+}
+
 function installPlaywrightNetworkPolicy(playwright) {
   for (const browserName of ["chromium", "firefox", "webkit"]) {
     const browserType = playwright?.[browserName];
     if (!browserType || browserType.__iniadNetworkPolicyInstalled) continue;
 
-    const originalLaunchPersistentContext =
-      browserType.launchPersistentContext.bind(browserType);
+    const originalLaunchPersistentContext = browserType.launchPersistentContext.bind(browserType);
     Object.defineProperty(browserType, "__iniadNetworkPolicyInstalled", {
       value: true,
       enumerable: false,
     });
+
+    for (const methodName of ["launch", "connect", "connectOverCDP"]) {
+      if (typeof browserType[methodName] !== "function") continue;
+      const originalMethod = browserType[methodName].bind(browserType);
+      browserType[methodName] = async (...args) => {
+        const browser = await originalMethod(...args);
+        return applyNetworkPolicyToBrowser(browser);
+      };
+    }
+
     browserType.launchPersistentContext = async (userDataDir, options = {}) => {
       const context = await originalLaunchPersistentContext(userDataDir, {
         ...options,
         serviceWorkers: "block",
       });
-      try {
-        await context.route("**/*", (route) =>
-          isAllowedMcpBrowserUrl(route.request().url())
-            ? route.continue()
-            : route.abort("blockedbyclient")
-        );
-        if (typeof context.routeWebSocket !== "function") {
-          throw new Error("Playwright WebSocket routing is required by the MCP network policy");
-        }
-        await context.routeWebSocket("**/*", async (webSocket) => {
-          if (isAllowedMcpBrowserUrl(webSocket.url())) {
-            webSocket.connectToServer();
-            return;
-          }
-          await webSocket.close({ code: 1008, reason: "Blocked by MCP network policy" });
-        });
-        return context;
-      } catch (error) {
-        await context.close().catch(() => undefined);
-        throw error;
-      }
+      return applyNetworkPolicyToContext(context);
     };
   }
 }

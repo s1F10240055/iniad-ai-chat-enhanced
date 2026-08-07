@@ -39,7 +39,9 @@ export class SyllabusIndexService {
 
     try {
       const raw = readFileSync(filePath, "utf-8");
-      this.index = JSON.parse(raw) as SyllabusIndex;
+      const parsed = JSON.parse(raw) as unknown;
+      if (!isSyllabusIndex(parsed)) throw new Error("Invalid syllabus index");
+      this.index = parsed;
       console.log(`[SyllabusIndex] Loaded ${this.index.courses.length} courses`);
     } catch {
       console.warn("[SyllabusIndex] Failed to load index");
@@ -124,4 +126,13 @@ export class SyllabusIndexService {
       .split(new RegExp(`${STOP_WORDS.source}|${SPLIT_CHARS.source}`))
       .filter((t) => t.length >= MIN_TOKEN_LENGTH);
   }
+}
+
+function isSyllabusIndex(value: unknown): value is SyllabusIndex {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const courses = (value as { courses?: unknown }).courses;
+  return (
+    Array.isArray(courses) &&
+    courses.every((course) => !!course && typeof course === "object" && !Array.isArray(course))
+  );
 }

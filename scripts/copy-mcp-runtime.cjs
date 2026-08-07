@@ -109,36 +109,30 @@ function copyPackageClosure(
   fs.cpSync(packageDir, path.join(targetNodeModules, relativeDir), {
     recursive: true,
     force: true,
+    dereference: true,
   });
 
   const metadata = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
   for (const dependency of Object.keys(metadata.dependencies || {})) {
-    copyPackageClosure(
-      dependency,
-      packageDir,
-      projectNodeModules,
-      targetNodeModules,
-      seen
-    );
+    copyPackageClosure(dependency, packageDir, projectNodeModules, targetNodeModules, seen);
   }
   for (const dependency of Object.keys(metadata.optionalDependencies || {})) {
-    copyPackageClosure(
-      dependency,
-      packageDir,
-      projectNodeModules,
-      targetNodeModules,
-      seen,
-      true
-    );
+    copyPackageClosure(dependency, packageDir, projectNodeModules, targetNodeModules, seen, true);
   }
 }
 
 function buildMcpRuntime(projectDir) {
-  const resolvedProjectDir = path.resolve(projectDir);
-  const targetRoot = path.join(resolvedProjectDir, ".mcp-runtime");
-  if (path.dirname(targetRoot) !== resolvedProjectDir || path.basename(targetRoot) !== ".mcp-runtime") {
-    throw new Error("Refusing to write MCP runtime outside the project directory");
+  const scriptProjectDir = fs.realpathSync(path.resolve(__dirname, ".."));
+  let resolvedProjectDir;
+  try {
+    resolvedProjectDir = fs.realpathSync(path.resolve(projectDir));
+  } catch {
+    throw new Error("Refusing to write MCP runtime outside this project");
   }
+  if (resolvedProjectDir !== scriptProjectDir) {
+    throw new Error("Refusing to write MCP runtime outside this project");
+  }
+  const targetRoot = path.join(resolvedProjectDir, ".mcp-runtime");
 
   fs.rmSync(targetRoot, { recursive: true, force: true });
   const projectNodeModules = path.join(resolvedProjectDir, "node_modules");
@@ -151,6 +145,10 @@ function buildMcpRuntime(projectDir) {
     targetNodeModules,
     new Set()
   );
+  const mcpCliTarget = path.join(targetNodeModules, "@rarandeyo", "iniad-moocs-mcp", "cli.js");
+  if (!fs.existsSync(mcpCliTarget) || !fs.statSync(mcpCliTarget).isFile()) {
+    throw new Error("MCP CLI entry point was not found in the packaged runtime");
+  }
 
   const projectRequire = createRequire(path.join(resolvedProjectDir, "package.json"));
   const { chromium } = projectRequire("playwright");
@@ -178,7 +176,11 @@ function buildMcpRuntime(projectDir) {
   fs.mkdirSync(path.dirname(nodeTarget), { recursive: true });
   fs.copyFileSync(process.execPath, nodeTarget);
   fs.chmodSync(nodeTarget, 0o755);
-  fs.cpSync(chromiumRoot, browserTarget, { recursive: true, force: true });
+  fs.cpSync(chromiumRoot, browserTarget, {
+    recursive: true,
+    force: true,
+    dereference: true,
+  });
   fs.copyFileSync(path.join(resolvedProjectDir, "scripts", "mcp-runtime-entry.cjs"), entryTarget);
   fs.copyFileSync(
     path.join(resolvedProjectDir, "scripts", "mcp-network-policy.cjs"),
@@ -189,19 +191,8 @@ function buildMcpRuntime(projectDir) {
     schemaVersion: 1,
     nodeExecutable: path.relative(targetRoot, nodeTarget),
     entryScript: path.relative(targetRoot, entryTarget),
-    mcpCli: path.relative(
-      targetRoot,
-      path.join(
-        targetNodeModules,
-        "@rarandeyo",
-        "iniad-moocs-mcp",
-        "cli.js"
-      )
-    ),
-    chromiumExecutable: path.join(
-      "browser",
-      path.relative(chromiumRoot, chromiumExecutable)
-    ),
+    mcpCli: path.relative(targetRoot, mcpCliTarget),
+    chromiumExecutable: path.join("browser", path.relative(chromiumRoot, chromiumExecutable)),
   };
   fs.writeFileSync(
     path.join(targetRoot, "runtime.json"),

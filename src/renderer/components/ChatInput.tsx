@@ -17,6 +17,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 }) => {
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const wasLoadingRef = useRef(isLoading);
   const historyRef = useRef<string[]>([]);
   const historyIndexRef = useRef<number>(-1);
   const draftRef = useRef<string>("");
@@ -27,6 +28,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 150)}px`;
     }
   }, [text]);
+
+  useEffect(() => {
+    const wasLoading = wasLoadingRef.current;
+    wasLoadingRef.current = isLoading;
+    if (wasLoading && !isLoading && !disabled) {
+      textareaRef.current?.focus();
+    }
+  }, [disabled, isLoading]);
 
   const handleSubmit = useCallback(
     (e?: React.SyntheticEvent) => {

@@ -52,9 +52,14 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         : null);
 
   return (
-    <footer className={`status-bar status-${connection.status}`} aria-live="polite">
+    <footer className={`status-bar status-${connection.status}`}>
       <div className="status-main-row">
-        <div className="status-item status-connection-item">
+        <div
+          className="status-item status-connection-item"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
           <svg
             width="10"
             height="10"

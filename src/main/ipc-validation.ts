@@ -1,5 +1,5 @@
 import { AppError } from "../shared/types/errors";
-import type { PartialAppSettings } from "../shared/types/settings";
+import { OFFICIAL_API_HOST, type PartialAppSettings } from "../shared/types/settings";
 
 const MAX_CHAT_CHARS = 8_000;
 const MAX_EXTERNAL_URL_CHARS = 2_048;
@@ -11,7 +11,6 @@ const ALLOWED_SETTING_KEYS = new Set([
   "moocsPassword",
 ]);
 const ALLOWED_MODELS = new Set(["gpt-5.4-nano", "gpt-5.4-mini", "gpt-5.4"]);
-const OFFICIAL_API_HOST = "api.openai.iniad.org";
 
 function invalid(message: string): never {
   throw new AppError("INVALID_INPUT", message);

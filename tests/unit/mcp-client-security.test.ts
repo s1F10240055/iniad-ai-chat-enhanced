@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const sdkMocks = vi.hoisted(() => ({
   connect: vi.fn(),
+  ping: vi.fn(),
   listTools: vi.fn(),
   callTool: vi.fn(),
   clientClose: vi.fn(),
@@ -20,6 +21,10 @@ vi.mock("@modelcontextprotocol/sdk/client/index", () => ({
 
     connect(...args: unknown[]) {
       return sdkMocks.connect(...args);
+    }
+
+    ping(...args: unknown[]) {
+      return sdkMocks.ping(...args);
     }
 
     listTools(...args: unknown[]) {
@@ -69,6 +74,7 @@ function availableTools() {
 describe("McpClient security boundary", () => {
   beforeEach(() => {
     sdkMocks.connect.mockReset().mockResolvedValue(undefined);
+    sdkMocks.ping.mockReset().mockResolvedValue({});
     sdkMocks.listTools.mockReset().mockResolvedValue({ tools: availableTools() });
     sdkMocks.callTool.mockReset().mockResolvedValue({ content: [] });
     sdkMocks.clientClose.mockReset().mockResolvedValue(undefined);
@@ -191,6 +197,23 @@ describe("McpClient security boundary", () => {
     expect(sdkMocks.clientClose).toHaveBeenCalled();
   });
 
+  it("uses MCP ping for health checks without listing all tools again", async () => {
+    const client = new McpClient();
+    await client.connect("student", "password");
+    const controller = new AbortController();
+
+    await expect(client.ping(controller.signal)).resolves.toBe(true);
+
+    expect(sdkMocks.ping).toHaveBeenCalledWith(
+      expect.objectContaining({
+        timeout: 5_000,
+        maxTotalTimeout: 5_000,
+        signal: controller.signal,
+      })
+    );
+    expect(sdkMocks.listTools).toHaveBeenCalledTimes(1);
+  });
+
   it("deduplicates direct connect calls on the same client", async () => {
     let finishInitialize!: () => void;
     sdkMocks.connect.mockImplementationOnce(
@@ -240,6 +263,20 @@ describe("McpClient security boundary", () => {
       client.callToolSafe("listCourses", undefined, 45_000, controller.signal)
     ).rejects.toEqual(expect.objectContaining({ code: "CHAT_CANCELLED" }));
     expect(sdkMocks.callTool).not.toHaveBeenCalled();
+  });
+
+  it("does not treat an arbitrary error message containing aborted as user cancellation", async () => {
+    const client = new McpClient();
+    await client.connect("student", "password");
+    sdkMocks.callTool.mockRejectedValueOnce(new Error("remote operation aborted unexpectedly"));
+
+    await expect(client.callToolSafe("listCourses")).rejects.toEqual(
+      expect.objectContaining<McpClientError>({
+        code: "MCP_CONNECTION_FAILED",
+        kind: "unknown",
+      })
+    );
+    expect(client.getStatus()).toBe("connected");
   });
 
   it("marks transport failures disconnected and notifies Main with sanitized metadata", async () => {

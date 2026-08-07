@@ -22,6 +22,7 @@ const SPLIT_CHARS = /[のはがをにでともへや、。！？・\s\-_.：:；
 
 export class SlidesIndexService {
   private index: SlidesIndex | null = null;
+  private entriesByMoocsUrl = new Map<string, SlideIndexEntry>();
 
   load(indexPath?: string): void {
     const filePath = indexPath ?? DEFAULT_INDEX_PATH;
@@ -29,10 +30,17 @@ export class SlidesIndexService {
     try {
       const raw = readFileSync(filePath, "utf-8");
       this.index = JSON.parse(raw) as SlidesIndex;
+      this.entriesByMoocsUrl = new Map();
+      for (const entry of this.index.entries) {
+        const key = normalizeMoocsUrlKey(entry.moocsUrl);
+        // Preserve Array.find's existing first-entry-wins behavior for duplicates.
+        if (!this.entriesByMoocsUrl.has(key)) this.entriesByMoocsUrl.set(key, entry);
+      }
       console.log(`[SlidesIndex] Loaded ${this.index.entries.length} slide entries`);
     } catch {
       console.warn("[SlidesIndex] Failed to load index");
       this.index = null;
+      this.entriesByMoocsUrl.clear();
     }
   }
 
@@ -48,10 +56,7 @@ export class SlidesIndexService {
   /** 資料本文に加え、科目名・講義回・資料番号を引用表示へ引き継ぐための検索。 */
   getEntryByMoocsUrl(moocsUrl: string): SlideIndexEntry | null {
     if (!this.index?.entries?.length) return null;
-    const normalized = moocsUrl.replace(/\/$/, "");
-    return (
-      this.index.entries.find((entry) => entry.moocsUrl.replace(/\/$/, "") === normalized) ?? null
-    );
+    return this.entriesByMoocsUrl.get(normalizeMoocsUrlKey(moocsUrl)) ?? null;
   }
 
   matchSlides(query: string, courseCode?: string): SlideMatch[] {
@@ -152,4 +157,8 @@ export class SlidesIndexService {
       .map((t) => t.trim())
       .filter((t) => t.length >= MIN_TOKEN_LENGTH);
   }
+}
+
+function normalizeMoocsUrlKey(url: string): string {
+  return url.replace(/\/$/, "");
 }

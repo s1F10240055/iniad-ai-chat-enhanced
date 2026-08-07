@@ -8,6 +8,11 @@ const DEFAULT_BACKOFF_BASE_MS = 500;
 const DEFAULT_BACKOFF_MAX_MS = 4_000;
 const MANUAL_DISCONNECT_REASON = Symbol("manual-mcp-disconnect");
 
+const DEFAULT_AUTOMATIC_RECONNECT_MAX_CYCLES = 3;
+const DEFAULT_AUTOMATIC_RECONNECT_BASE_DELAY_MS = 500;
+const DEFAULT_AUTOMATIC_RECONNECT_MAX_DELAY_MS = 4_000;
+const DEFAULT_STABLE_CONNECTION_RESET_MS = 30_000;
+
 export interface McpCredentials {
   moocsUsername: string;
   moocsPassword: string;
@@ -28,6 +33,85 @@ export interface McpConnectionResult {
 
 export type McpConnectionBroadcast = (state: McpConnectionState) => void;
 
+export interface AutomaticReconnectDecision {
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+}
+
+export interface AutomaticReconnectPolicyOptions {
+  maxCycles?: number;
+  baseDelayMs?: number;
+  maxDelayMs?: number;
+  stableConnectionResetMs?: number;
+}
+
+/**
+ * 短時間に「接続成功→transport切断」が繰り返されても、子プロセスを無制限に
+ * 再起動しないための外側の再接続制限。接続が一定時間安定した場合だけ制限を戻す。
+ */
+export class AutomaticReconnectPolicy {
+  private readonly maxCycles: number;
+  private readonly baseDelayMs: number;
+  private readonly maxDelayMs: number;
+  private readonly stableConnectionResetMs: number;
+  private consecutiveIssues = 0;
+  private stableResetTimer: ReturnType<typeof setTimeout> | undefined;
+
+  constructor(options: AutomaticReconnectPolicyOptions = {}) {
+    this.maxCycles = clampInteger(
+      options.maxCycles ?? DEFAULT_AUTOMATIC_RECONNECT_MAX_CYCLES,
+      1,
+      10
+    );
+    this.baseDelayMs = clampInteger(
+      options.baseDelayMs ?? DEFAULT_AUTOMATIC_RECONNECT_BASE_DELAY_MS,
+      0,
+      30_000
+    );
+    this.maxDelayMs = clampInteger(
+      options.maxDelayMs ?? DEFAULT_AUTOMATIC_RECONNECT_MAX_DELAY_MS,
+      this.baseDelayMs,
+      60_000
+    );
+    this.stableConnectionResetMs = clampInteger(
+      options.stableConnectionResetMs ?? DEFAULT_STABLE_CONNECTION_RESET_MS,
+      1,
+      10 * 60_000
+    );
+  }
+
+  recordIssue(): AutomaticReconnectDecision | null {
+    this.markUnstable();
+    if (this.consecutiveIssues >= this.maxCycles) return null;
+
+    this.consecutiveIssues += 1;
+    return {
+      attempt: this.consecutiveIssues,
+      maxAttempts: this.maxCycles,
+      delayMs: Math.min(this.maxDelayMs, this.baseDelayMs * 2 ** (this.consecutiveIssues - 1)),
+    };
+  }
+
+  markConnected(): void {
+    this.markUnstable();
+    this.stableResetTimer = setTimeout(() => {
+      this.consecutiveIssues = 0;
+      this.stableResetTimer = undefined;
+    }, this.stableConnectionResetMs);
+  }
+
+  markUnstable(): void {
+    if (this.stableResetTimer) clearTimeout(this.stableResetTimer);
+    this.stableResetTimer = undefined;
+  }
+
+  reset(): void {
+    this.markUnstable();
+    this.consecutiveIssues = 0;
+  }
+}
+
 /** client ごとに接続処理を一本化し、別 client の処理とは干渉させない。 */
 const connectInFlight = new WeakMap<McpClient, Promise<McpConnectionResult>>();
 const operationControllers = new WeakMap<McpClient, AbortController>();
@@ -36,6 +120,10 @@ const lastConnectedAt = new WeakMap<McpClient, string>();
 /**
  * MCP 接続を確立する。initialize + 必須 tools/list 確認は McpClient.connect が担う。
  * 一時障害だけを上限付き指数バックオフで再試行する。
+ *
+ * 同じ client に接続処理が存在する場合は、その共有 Promise を返す。共有処理を
+ * 所有するのは最初の呼び出しであり、後続呼び出しの signal は共有処理を中断しない。
+ * 後続の待機だけをキャンセルしたい呼び出し側は、共有 Promise を signal と race する。
  */
 export function ensureMcpConnected(
   mcpClient: McpClient,
@@ -189,7 +277,17 @@ async function connectWithRetry(
       return { connected: false, state };
     }
 
-    const connectionError = toConnectionError(signal.aborted ? cancelledConnectionError() : error);
+    if (signal.aborted) {
+      await mcpClient.disconnect();
+      const state: McpConnectionState = {
+        status: "disconnected",
+        lastConnectedAt: lastConnectedAt.get(mcpClient),
+      };
+      broadcastState(state);
+      return { connected: false, state };
+    }
+
+    const connectionError = toConnectionError(error);
     const state = errorState(connectionError, undefined, options.maxAttempts, mcpClient);
     broadcastState(state);
     return { connected: false, error: connectionError.message, state };

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, session } from "electron";
+import { app, BrowserWindow, session, type WebContents } from "electron";
 import { registerIpcHandlers, shutdownIpcServices } from "./ipc-handlers";
 import { settingsStore } from "./services/settings-store";
 
@@ -14,6 +14,11 @@ declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
 const trustedWebContentsIds = new Set<number>();
 let shutdownStarted = false;
 let shutdownComplete = false;
+
+const isAllowedSessionPermission = (webContents: WebContents | null, permission: string): boolean =>
+  webContents !== null &&
+  trustedWebContentsIds.has(webContents.id) &&
+  permission === "clipboard-sanitized-write";
 
 const createWindow = (): void => {
   const mainWindow = new BrowserWindow({
@@ -52,10 +57,11 @@ const createWindow = (): void => {
 };
 
 app.whenReady().then(async () => {
+  session.defaultSession.setPermissionCheckHandler((webContents, permission) =>
+    isAllowedSessionPermission(webContents, permission)
+  );
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-    const allowClipboardWrite =
-      trustedWebContentsIds.has(webContents.id) && permission === "clipboard-sanitized-write";
-    callback(allowClipboardWrite);
+    callback(isAllowedSessionPermission(webContents, permission));
   });
 
   try {

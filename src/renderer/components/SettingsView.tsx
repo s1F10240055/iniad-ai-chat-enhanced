@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import type { AppSettings, PublicAppSettings } from "../../shared/types";
-import { DEFAULT_SETTINGS } from "../../shared/types";
+import { DEFAULT_SETTINGS, OFFICIAL_API_HOST } from "../../shared/types";
 
 /** バリデーションエラーの型 */
 interface ValidationErrors {
@@ -35,7 +35,7 @@ function isValidURL(url: string): boolean {
     const parsed = new URL(url);
     return (
       parsed.protocol === "https:" &&
-      parsed.hostname === "api.openai.iniad.org" &&
+      parsed.hostname === OFFICIAL_API_HOST &&
       !parsed.username &&
       !parsed.password &&
       !parsed.port
@@ -369,7 +369,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
               className={`settings-input ${errors.baseURL ? "error" : ""}`}
               value={settings.baseURL}
               onChange={(e) => updateField("baseURL", e.target.value)}
-              placeholder="https://api.openai.iniad.org/api/v1"
+              placeholder={DEFAULT_SETTINGS.baseURL}
             />
             {errors.baseURL && <span className="settings-error">{errors.baseURL}</span>}
           </div>

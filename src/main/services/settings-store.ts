@@ -14,6 +14,7 @@ import { join, dirname } from "path";
 import {
   AppSettings,
   DEFAULT_SETTINGS,
+  OFFICIAL_API_HOST,
   PartialAppSettings,
   PublicAppSettings,
 } from "../../shared/types/settings";
@@ -25,7 +26,6 @@ const CREDENTIALS_FILE = "credentials.enc";
 
 /** 旧版が平文フォールバックで保存したファイルを検出するためのプレフィックス */
 const PLAINTEXT_PREFIX = "plaintext:";
-const OFFICIAL_API_HOST = "api.openai.iniad.org";
 const ALLOWED_MODELS = new Set(["gpt-5.4-nano", "gpt-5.4-mini", "gpt-5.4"]);
 
 /** Reject Linux's unprotected fallback in addition to unavailable safeStorage. */

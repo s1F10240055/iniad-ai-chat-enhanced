@@ -57,8 +57,16 @@ describe("MCP browser network policy", () => {
       expect.objectContaining({ headless: true, serviceWorkers: "block" })
     );
 
-    const allowed = { request: () => ({ url: () => "https://moocs.iniad.org/" }), continue: vi.fn(), abort: vi.fn() };
-    const blocked = { request: () => ({ url: () => "http://localhost/private" }), continue: vi.fn(), abort: vi.fn() };
+    const allowed = {
+      request: () => ({ url: () => "https://moocs.iniad.org/" }),
+      continue: vi.fn(),
+      abort: vi.fn(),
+    };
+    const blocked = {
+      request: () => ({ url: () => "http://localhost/private" }),
+      continue: vi.fn(),
+      abort: vi.fn(),
+    };
     await routeHandler!(allowed);
     await routeHandler!(blocked);
     expect(allowed.continue).toHaveBeenCalledOnce();
@@ -81,5 +89,72 @@ describe("MCP browser network policy", () => {
       code: 1008,
       reason: "Blocked by MCP network policy",
     });
+  });
+
+  it("applies the policy to launch, connect, and CDP browser contexts", async () => {
+    const createContext = () => ({
+      route: vi.fn(async () => undefined),
+      routeWebSocket: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+    });
+    const createBrowser = (existingContexts: ReturnType<typeof createContext>[] = []) => ({
+      newContext: vi.fn(async (_options?: unknown) => createContext()),
+      contexts: vi.fn(() => existingContexts),
+      close: vi.fn(async () => undefined),
+    });
+
+    const launchedBrowser = createBrowser();
+    const connectedBrowser = createBrowser();
+    const launchedNewContext = launchedBrowser.newContext;
+    const connectedNewContext = connectedBrowser.newContext;
+    const existingCdpContext = createContext();
+    const cdpBrowser = createBrowser([existingCdpContext]);
+    const browserType = {
+      launchPersistentContext: vi.fn(async () => createContext()),
+      launch: vi.fn(async (_options?: unknown) => launchedBrowser),
+      connect: vi.fn(async (_endpoint: string, _options?: unknown) => connectedBrowser),
+      connectOverCDP: vi.fn(async (_endpoint: string, _options?: unknown) => cdpBrowser),
+    };
+    installPlaywrightNetworkPolicy({ chromium: browserType });
+
+    const launched = await browserType.launch({ headless: true });
+    const launchedContext = await launched.newContext({ locale: "ja-JP" });
+    expect(launchedNewContext).toHaveBeenCalledWith({
+      locale: "ja-JP",
+      serviceWorkers: "block",
+    });
+    expect(launchedContext.route).toHaveBeenCalledOnce();
+    expect(launchedContext.routeWebSocket).toHaveBeenCalledOnce();
+
+    const connected = await browserType.connect("wss://browser.example/socket");
+    const connectedContext = await connected.newContext();
+    expect(connectedNewContext).toHaveBeenCalledWith({ serviceWorkers: "block" });
+    expect(connectedContext.route).toHaveBeenCalledOnce();
+    expect(connectedContext.routeWebSocket).toHaveBeenCalledOnce();
+
+    await browserType.connectOverCDP("https://browser.example/cdp");
+    expect(existingCdpContext.route).toHaveBeenCalledOnce();
+    expect(existingCdpContext.routeWebSocket).toHaveBeenCalledOnce();
+  });
+
+  it("closes a newly created context when WebSocket routing is unavailable", async () => {
+    const context = {
+      route: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+    };
+    const browser = {
+      newContext: vi.fn(async () => context),
+      contexts: vi.fn(() => []),
+      close: vi.fn(async () => undefined),
+    };
+    const browserType = {
+      launchPersistentContext: vi.fn(),
+      launch: vi.fn(async () => browser),
+    };
+    installPlaywrightNetworkPolicy({ chromium: browserType });
+
+    const launched = await browserType.launch();
+    await expect(launched.newContext()).rejects.toThrow("Playwright WebSocket routing is required");
+    expect(context.close).toHaveBeenCalledOnce();
   });
 });

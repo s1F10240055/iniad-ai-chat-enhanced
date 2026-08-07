@@ -43,10 +43,13 @@ export interface PublicAppSettings {
   hasMoocsCredentials: boolean;
 }
 
+/** 認証情報を送信してよい公式 INIAD API ホスト。 */
+export const OFFICIAL_API_HOST = "api.openai.iniad.org";
+
 /** AppSettings のデフォルト値 */
 export const DEFAULT_SETTINGS: AppSettings = {
   apiKey: "",
-  baseURL: "https://api.openai.iniad.org/api/v1",
+  baseURL: `https://${OFFICIAL_API_HOST}/api/v1`,
   model: "gpt-5.4-nano",
   moocsUsername: "",
   moocsPassword: "",

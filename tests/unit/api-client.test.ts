@@ -30,10 +30,14 @@ describe("api-client", () => {
   });
 
   it("rejects non-official or insecure API destinations at the request boundary", () => {
-    expect(() => buildApiUrl("https://api.example.com/v1", "models")).toThrow(
+    expect(() => buildApiUrl("https://api.example.com/v1", "models")).toThrow("公式 INIAD API");
+    expect(() => buildApiUrl("http://api.openai.iniad.org/api/v1", "models")).toThrow(
       "公式 INIAD API"
     );
-    expect(() => buildApiUrl("http://api.openai.iniad.org/api/v1", "models")).toThrow(
+    expect(() =>
+      buildApiUrl("https://user:password@api.openai.iniad.org/api/v1", "models")
+    ).toThrow("公式 INIAD API");
+    expect(() => buildApiUrl("https://api.openai.iniad.org:8443/api/v1", "models")).toThrow(
       "公式 INIAD API"
     );
   });

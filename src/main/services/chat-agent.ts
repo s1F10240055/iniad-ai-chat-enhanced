@@ -15,7 +15,7 @@ import type { IWebSearchProvider } from "./web-search-types";
 import type { SyllabusIndexService } from "./syllabus-index";
 import type { SlidesIndexService } from "./slides-index";
 import type { MaterialContextInput, SelectedMaterialContext } from "./in-memory-store";
-import { MATERIAL_CONTEXT_LIMITS } from "./in-memory-store";
+import { MATERIAL_CONTEXT_LIMITS, normalizeMaterialUrl } from "./in-memory-store";
 import { MOOCS_AGENT_TOOLS } from "./moocs-tool-definitions";
 import { executeAgentTool, type AgentToolExecutionResult } from "./moocs-tool-executor";
 import { prepareApiMessages, estimatePayloadChars } from "./agent-api-messages";
@@ -322,7 +322,7 @@ export class ChatAgent {
       if (remainingHistoryChars <= 0) break;
       const turn = selectedHistory[i];
       const content = truncateHistoryTurn(turn.content, remainingHistoryChars);
-      if (!content) break;
+      if (!content) continue;
       selected.unshift({ ...turn, content });
       remainingHistoryChars -= content.length;
     }
@@ -346,18 +346,31 @@ export class ChatAgent {
       .filter(({ score, index }) => score > 0 || index >= recentStart)
       .sort((a, b) => b.score - a.score || b.index - a.index);
 
-    const chosen = new Set<number>();
+    const chosen = new Map<number, ChatTurn>();
     let chars = 0;
     for (const candidate of ranked) {
       if (chosen.size >= MAX_HISTORY_TURNS) break;
-      const boundedChars = Math.min(candidate.turn.content.length, MAX_HISTORY_CHARS);
-      if (chars + boundedChars > MAX_HISTORY_CHARS) continue;
-      chosen.add(candidate.index);
-      chars += boundedChars;
+      const candidateIndices = adjacentConversationIndices(history, candidate.index).filter(
+        (index) => !chosen.has(index) && history[index].content.length > 0
+      );
+      if (
+        candidateIndices.length === 0 ||
+        chosen.size + candidateIndices.length > MAX_HISTORY_TURNS
+      ) {
+        continue;
+      }
+
+      const boundedGroup = boundHistoryGroup(
+        candidateIndices.map((index) => ({ index, turn: history[index] })),
+        MAX_HISTORY_CHARS - chars
+      );
+      if (boundedGroup.length === 0) continue;
+      for (const { index, turn } of boundedGroup) chosen.set(index, turn);
+      chars += boundedGroup.reduce((sum, { turn }) => sum + turn.content.length, 0);
     }
 
     if (chosen.size === 0) return history.slice(-MAX_HISTORY_TURNS);
-    return history.filter((_turn, index) => chosen.has(index));
+    return [...chosen.entries()].sort(([left], [right]) => left - right).map(([, turn]) => turn);
   }
 
   private buildPriorMaterialMessage(
@@ -429,10 +442,44 @@ function truncateHistoryTurn(content: string, maxChars: number): string {
   return `${content.slice(0, headChars)}${marker}${content.slice(-tailChars)}`;
 }
 
+function adjacentConversationIndices(history: ChatTurn[], index: number): number[] {
+  const turn = history[index];
+  if (turn.role === "user" && history[index + 1]?.role === "assistant") {
+    return [index, index + 1];
+  }
+  if (turn.role === "assistant" && history[index - 1]?.role === "user") {
+    return [index - 1, index];
+  }
+  return [index];
+}
+
+function boundHistoryGroup(
+  entries: Array<{ index: number; turn: ChatTurn }>,
+  maxChars: number
+): Array<{ index: number; turn: ChatTurn }> {
+  if (maxChars < entries.length) return [];
+
+  let remainingChars = maxChars;
+  const bounded: Array<{ index: number; turn: ChatTurn }> = [];
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    const remainingTurns = entries.length - i;
+    const turnBudget =
+      remainingTurns === 1
+        ? remainingChars
+        : Math.max(1, Math.floor(remainingChars / remainingTurns));
+    const content = truncateHistoryTurn(entry.turn.content, turnBudget);
+    if (!content) continue;
+    bounded.push({ index: entry.index, turn: { ...entry.turn, content } });
+    remainingChars -= content.length;
+  }
+  return bounded;
+}
+
 function mergeCitation(citations: Citation[], incoming: Citation): void {
-  const normalizedUrl = incoming.url.replace(/\/$/, "");
+  const normalizedUrl = normalizeMaterialUrl(incoming.url) ?? incoming.url;
   const existingIndex = citations.findIndex(
-    (citation) => citation.url.replace(/\/$/, "") === normalizedUrl
+    (citation) => (normalizeMaterialUrl(citation.url) ?? citation.url) === normalizedUrl
   );
   if (existingIndex < 0) {
     citations.push(incoming);

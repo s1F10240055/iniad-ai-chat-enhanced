@@ -9,6 +9,7 @@ import {
 } from "../../shared/utils/google-slide-text";
 import {
   getMoocsPageKind,
+  inferMoocsLocation,
   isGoogleSlidePage,
   pageCitationTitle,
   type MoocsPageKind,
@@ -192,38 +193,31 @@ export class MoocsPageReader {
     recordable = true
   ): MaterialToolExecutionResult {
     if (!recordable || !isRecordableMaterial(content)) return { content, citations };
-    const materials = citations.map((citation) => ({
-      title: citation.title,
-      url: citation.url,
-      location: citation.location,
-      sourceType: citation.sourceType,
+    // A read operation returns one page body. When navigation and extraction
+    // produce multiple citations, the last citation is the resolved page that
+    // actually owns that body; duplicating it across every citation would retain
+    // incorrect material↔content associations.
+    const primaryCitation = citations.at(-1);
+    if (!primaryCitation) return { content, citations };
+    return {
       content,
-    }));
-    return materials.length > 0 ? { content, citations, materials } : { content, citations };
+      citations,
+      materials: [
+        {
+          title: primaryCitation.title,
+          url: primaryCitation.url,
+          location: primaryCitation.location,
+          sourceType: primaryCitation.sourceType,
+          content,
+        },
+      ],
+    };
   }
 }
 
 function formatIndexNumber(value: string): string {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? String(parsed) : value;
-}
-
-function inferMoocsLocation(url: string): string | undefined {
-  try {
-    const parts = new URL(url).pathname.replace(/\/$/, "").split("/");
-    const coursesIndex = parts.indexOf("courses");
-    const lecture = coursesIndex >= 0 ? parts[coursesIndex + 3] : undefined;
-    const page = coursesIndex >= 0 ? parts[coursesIndex + 4] : undefined;
-    if (!lecture) return undefined;
-    const lectureLabel = `第${formatIndexNumber(lecture)}回`;
-    if (!page) return lectureLabel;
-    if (/^\d+$/.test(page)) return `${lectureLabel} / 資料${formatIndexNumber(page)}`;
-    if (page === "review") return `${lectureLabel} / 課題解説`;
-    if (page === "exercise") return `${lectureLabel} / 演習課題`;
-    return lectureLabel;
-  } catch {
-    return undefined;
-  }
 }
 
 function isRecordableMaterial(content: string): boolean {

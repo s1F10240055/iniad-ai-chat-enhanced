@@ -92,6 +92,33 @@ describe("MoocsPageReader", () => {
     expect(result.content).toContain("C言語");
   });
 
+  it("records extracted content only against the resolved primary citation", async () => {
+    const resolvedUrl = "https://moocs.iniad.org/courses/2026/COS201/01/02";
+    const mcpClient = createMcpMock({
+      extractGoogleSlideText: vi.fn().mockResolvedValue({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              moocsUrl: resolvedUrl,
+              text: "Resolved lecture material explains primary citation ownership and keeps extracted slide content associated with one canonical source.",
+              slideCount: 1,
+            }),
+          },
+        ],
+      }),
+    });
+    const reader = new MoocsPageReader(mcpClient);
+    const citations = [{ title: "Requested slide", url: SLIDE_URL, sourceType: "moocs" as const }];
+
+    const result = await reader.tryExtractSlideText(citations);
+
+    expect(result?.citations.map((citation) => citation.url)).toEqual([SLIDE_URL, resolvedUrl]);
+    expect(result?.materials).toEqual([
+      expect.objectContaining({ url: resolvedUrl, content: expect.stringContaining("Resolved") }),
+    ]);
+  });
+
   it("returns cached content on repeated read", async () => {
     const mcpClient = createMcpMock();
     const cache = new Map<string, string>();

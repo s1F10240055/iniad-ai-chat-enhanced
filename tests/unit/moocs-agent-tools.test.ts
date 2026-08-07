@@ -16,6 +16,8 @@ function createMcpMock(overrides: Partial<McpClient> = {}): McpClient {
       ],
     }),
     navigateTo: vi.fn().mockResolvedValue(undefined),
+    expandSlideTab: vi.fn().mockResolvedValue(undefined),
+    extractGoogleSlideText: vi.fn().mockResolvedValue({ content: [] }),
     callToolSafe: vi.fn().mockResolvedValue({
       content: [{ type: "text", text: "ok" }],
     }),
@@ -78,13 +80,9 @@ describe("executeAgentTool", () => {
 
     expect(result.content).toContain("Web");
     expect(webClient.search).toHaveBeenCalledWith("INIAD");
-    expect(result.materials).toEqual([
-      expect.objectContaining({
-        title: "Web",
-        url: "https://example.com",
-        content: "info",
-        sourceType: "web",
-      }),
+    expect(result.materials).toBeUndefined();
+    expect(result.citations).toEqual([
+      expect.objectContaining({ title: "Web", url: "https://example.com", sourceType: "web" }),
     ]);
   });
 
@@ -115,9 +113,10 @@ describe("executeAgentTool", () => {
       mcpConnected: false,
     });
 
-    expect(result.materials).toHaveLength(1);
-    expect(result.materials?.[0].title).toHaveLength(200);
-    expect(result.materials?.[0].snippet).toHaveLength(500);
+    expect(result.materials).toBeUndefined();
+    expect(result.citations).toHaveLength(1);
+    expect(result.citations[0].title).toHaveLength(200);
+    expect(result.citations[0].snippet).toHaveLength(500);
     expect(result.content).not.toContain("javascript:");
   });
 
@@ -150,6 +149,10 @@ describe("executeAgentTool", () => {
     expect(search.content).toContain("non-empty string");
     expect(mcpClient.loginToMoocs).not.toHaveBeenCalled();
     expect(mcpClient.navigateTo).not.toHaveBeenCalled();
+    expect(mcpClient.expandSlideTab).not.toHaveBeenCalled();
+    expect(mcpClient.extractGoogleSlideText).not.toHaveBeenCalled();
+    expect(mcpClient.ping).not.toHaveBeenCalled();
+    expect(mcpClient.callToolSafe).not.toHaveBeenCalled();
     expect(webClient.search).not.toHaveBeenCalled();
   });
 
@@ -191,14 +194,21 @@ describe("executeAgentTool", () => {
         }),
         getPageSnapshot: vi
           .fn()
-          .mockResolvedValue(`- Page URL: ${url}\n- Page Title: 第1回 課題解説\n- Page Snapshot\nポインタの説明`),
+          .mockResolvedValue(
+            `- Page URL: ${url}\n- Page Title: 第1回 課題解説\n- Page Snapshot\nポインタの説明`
+          ),
       }),
       webClient,
       mcpConnected: true,
     });
 
     expect(result.citations).toEqual([
-      expect.objectContaining({ title: "第1回 課題解説", url, sourceType: "moocs" }),
+      expect.objectContaining({
+        title: "第1回 課題解説",
+        url,
+        location: "第1回 / 課題解説",
+        sourceType: "moocs",
+      }),
     ]);
     expect(result.materials).toEqual([
       expect.objectContaining({ url, content: expect.stringContaining("ポインタ") }),

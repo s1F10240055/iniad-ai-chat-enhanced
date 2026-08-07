@@ -21,6 +21,12 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function getErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== "object" || !("code" in error)) return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" ? code : undefined;
+}
+
 const App: React.FC = () => {
   const [messages, setMessages] = useState<ChatTurn[]>([]);
   const [materialContext, setMaterialContext] = useState<MaterialContextSummary[]>([]);
@@ -34,12 +40,42 @@ const App: React.FC = () => {
   const [theme, setTheme] = useState<"light" | "dark">("dark");
   const [inputResetToken, setInputResetToken] = useState(0);
   const [notice, setNotice] = useState<UiNotice | null>(null);
+  const [isDataMenuOpen, setIsDataMenuOpen] = useState(false);
   const cancelRequestedRef = useRef(false);
   const receivedMcpStatusRef = useRef(false);
+  const dataMenuRef = useRef<HTMLDetailsElement>(null);
 
   useEffect(() => {
     document.documentElement.className = `theme-${theme}`;
   }, [theme]);
+
+  useEffect(() => {
+    if (!isDataMenuOpen) return;
+
+    const closeMenu = (restoreFocus: boolean) => {
+      const menu = dataMenuRef.current;
+      if (!menu) return;
+      menu.open = false;
+      setIsDataMenuOpen(false);
+      if (restoreFocus) menu.querySelector<HTMLElement>("summary")?.focus();
+    };
+    const handlePointerDown = (event: PointerEvent) => {
+      const menu = dataMenuRef.current;
+      if (menu && event.target instanceof Node && !menu.contains(event.target)) {
+        closeMenu(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeMenu(true);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isDataMenuOpen]);
 
   const toggleTheme = () => {
     setTheme((prev) => (prev === "dark" ? "light" : "dark"));
@@ -93,21 +129,26 @@ const App: React.FC = () => {
         });
       }
 
+      const hydrationErrors: string[] = [];
       if (historyResult.status === "fulfilled") {
         setMessages(historyResult.value);
       } else {
-        setNotice({
-          type: "error",
-          text: `会話履歴を取得できませんでした: ${describeError(historyResult.reason)}`,
-        });
+        hydrationErrors.push(
+          `会話履歴を取得できませんでした: ${describeError(historyResult.reason)}`
+        );
       }
 
       if (materialsResult.status === "fulfilled") {
         setMaterialContext(materialsResult.value);
       } else {
+        hydrationErrors.push(
+          `資料コンテキストを取得できませんでした: ${describeError(materialsResult.reason)}`
+        );
+      }
+      if (hydrationErrors.length > 0) {
         setNotice({
           type: "error",
-          text: `資料コンテキストを取得できませんでした: ${describeError(materialsResult.reason)}`,
+          text: hydrationErrors.join(" / "),
         });
       }
       setIsHydrated(true);
@@ -124,6 +165,7 @@ const App: React.FC = () => {
   /** ビュー切替 */
   const switchView = (target: ViewType) => {
     if (target === currentView) return;
+    setIsDataMenuOpen(false);
     setCurrentView(target);
   };
 
@@ -171,7 +213,7 @@ const App: React.FC = () => {
       await refreshMaterialContext();
     } catch (error) {
       const errMsg = describeError(error);
-      const wasCancelled = cancelRequestedRef.current || /cancel|abort|キャンセル/i.test(errMsg);
+      const wasCancelled = cancelRequestedRef.current || getErrorCode(error) === "CHAT_CANCELLED";
 
       try {
         setMessages(await window.electronAPI.getChatHistory());
@@ -326,7 +368,11 @@ const App: React.FC = () => {
               >
                 新しい会話
               </button>
-              <details className="data-menu">
+              <details
+                ref={dataMenuRef}
+                className="data-menu"
+                onToggle={(event) => setIsDataMenuOpen(event.currentTarget.open)}
+              >
                 <summary className="header-action-button">
                   履歴・資料
                   <span

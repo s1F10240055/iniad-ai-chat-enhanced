@@ -1,8 +1,9 @@
+import { OFFICIAL_API_HOST } from "../../shared/types/settings";
+
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_ATTEMPTS = 3;
 const MAX_ERROR_BODY_CHARS = 1_000;
 const MAX_ERROR_BODY_BYTES = 4_096;
-const OFFICIAL_API_HOST = "api.openai.iniad.org";
 
 const RETRYABLE_STATUS = new Set([408, 429]);
 const RETRYABLE_NETWORK_CODES = new Set([

@@ -1,12 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import {
+  AutomaticReconnectPolicy,
   disconnectMcp,
   ensureMcpConnected,
 } from "../../src/main/services/mcp-connection";
-import {
-  McpClientError,
-  type McpClient,
-} from "../../src/main/services/mcp-client";
+import { McpClientError, type McpClient } from "../../src/main/services/mcp-client";
 import type { McpStatus } from "../../src/shared/types/settings";
 
 type McpMock = McpClient & {
@@ -145,7 +143,7 @@ describe("ensureMcpConnected", () => {
     const second = ensureMcpConnected(mcpClient, broadcastState, credentials);
 
     expect(second).toBe(first);
-    expect(mcpClient.connect).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(mcpClient.connect).toHaveBeenCalledTimes(1));
     finishConnect();
     await expect(first).resolves.toEqual(expect.objectContaining({ connected: true }));
   });
@@ -264,10 +262,40 @@ describe("ensureMcpConnected", () => {
 
     const result = await pending;
     expect(result.connected).toBe(false);
-    expect(result.state.error).toEqual(
-      expect.objectContaining({ code: "CHAT_CANCELLED", retryable: false })
+    expect(result.state).toEqual(expect.objectContaining({ status: "disconnected" }));
+    expect(result.state.error).toBeUndefined();
+    expect(broadcastState).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: "disconnected" })
     );
+    expect(mcpClient.disconnect).toHaveBeenCalledTimes(1);
     expect(mcpClient.connect).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("AutomaticReconnectPolicy", () => {
+  it("bounds crash-loop reconnects, applies backoff, and resets after a stable connection", () => {
+    vi.useFakeTimers();
+    try {
+      const policy = new AutomaticReconnectPolicy({
+        maxCycles: 3,
+        baseDelayMs: 100,
+        maxDelayMs: 500,
+        stableConnectionResetMs: 1_000,
+      });
+
+      expect(policy.recordIssue()).toEqual({ attempt: 1, maxAttempts: 3, delayMs: 100 });
+      policy.markConnected();
+      expect(policy.recordIssue()).toEqual({ attempt: 2, maxAttempts: 3, delayMs: 200 });
+      expect(policy.recordIssue()).toEqual({ attempt: 3, maxAttempts: 3, delayMs: 400 });
+      expect(policy.recordIssue()).toBeNull();
+
+      policy.markConnected();
+      vi.advanceTimersByTime(1_000);
+      expect(policy.recordIssue()).toEqual({ attempt: 1, maxAttempts: 3, delayMs: 100 });
+      policy.reset();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

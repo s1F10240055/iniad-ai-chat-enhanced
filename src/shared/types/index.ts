@@ -21,7 +21,7 @@ export type {
   ConnectionTestResult,
 } from "./settings";
 
-export { DEFAULT_SETTINGS } from "./settings";
+export { DEFAULT_SETTINGS, OFFICIAL_API_HOST } from "./settings";
 
 export type {
   SearchResult,

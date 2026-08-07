@@ -8,8 +8,10 @@ import { apiRequestJson } from "./services/api-client";
 import { createAppServices } from "./services/app-services";
 import type { MaterialContextInput } from "./services/in-memory-store";
 import {
+  AutomaticReconnectPolicy,
   disconnectMcp,
   ensureMcpConnected,
+  type AutomaticReconnectDecision,
   type McpConnectionResult,
 } from "./services/mcp-connection";
 import { type McpClientError } from "./services/mcp-client";
@@ -40,8 +42,13 @@ let removeConnectionIssueListener: (() => void) | null = null;
 let shuttingDown = false;
 let shutdownPromise: Promise<void> | null = null;
 let mcpConnectionState: McpConnectionState = { status: "disconnected" };
+const automaticReconnectPolicy = new AutomaticReconnectPolicy();
+let automaticReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 function broadcastMcpState(next: McpConnectionState): void {
+  if (next.status === "connected") automaticReconnectPolicy.markConnected();
+  else automaticReconnectPolicy.markUnstable();
+
   mcpConnectionState = {
     ...next,
     lastConnectedAt: next.lastConnectedAt ?? mcpConnectionState.lastConnectedAt,
@@ -133,7 +140,7 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): void {
     store.clearConversationHistory();
   });
 
-  secureNoArg("context:list", options, async () => store.getMaterialSummaries());
+  secureNoArg("context:list", options, async () => store.getMaterialContextSummaries());
 
   secureNoArg("context:clear", options, async () => {
     await cancelActiveChat();
@@ -290,6 +297,7 @@ async function connectMcp(signal?: AbortSignal): Promise<McpConnectionResult> {
 }
 
 async function reconnectMcp(): Promise<McpConnectionResult> {
+  resetAutomaticReconnectState();
   const previousConnection = activeConnection;
   previousConnection?.controller.abort();
   await disconnectMcp(mcpClient, broadcastMcpState);
@@ -329,18 +337,43 @@ async function reconnectAfterCredentialChange(): Promise<void> {
 
 function handleMcpConnectionIssue(error: McpClientError): void {
   if (shuttingDown) return;
+  if (!error.retryable) {
+    resetAutomaticReconnectState();
+  }
+
+  let reconnectDecision: AutomaticReconnectDecision | null | undefined;
+  if (error.retryable && !automaticReconnectTimer) {
+    reconnectDecision = automaticReconnectPolicy.recordIssue();
+  }
+  const reconnectLimitReached = reconnectDecision === null;
   broadcastMcpState({
     status: "error",
     lastConnectedAt: mcpConnectionState.lastConnectedAt,
     error: {
       code: error.code,
       message: error.message,
-      guidance: error.guidance,
+      guidance: reconnectLimitReached
+        ? `${error.guidance} 短時間に切断が繰り返されたため、自動再接続を停止しました。画面の「再接続」を押してください。`
+        : error.guidance,
       retryable: error.retryable,
     },
   });
 
-  if (error.retryable) void connectMcp();
+  if (reconnectDecision) scheduleAutomaticReconnect(reconnectDecision);
+}
+
+function scheduleAutomaticReconnect(decision: AutomaticReconnectDecision): void {
+  automaticReconnectTimer = setTimeout(() => {
+    automaticReconnectTimer = null;
+    if (shuttingDown || mcpClient.getStatus() === "connected") return;
+    void connectMcp().catch(() => undefined);
+  }, decision.delayMs);
+}
+
+function resetAutomaticReconnectState(): void {
+  if (automaticReconnectTimer) clearTimeout(automaticReconnectTimer);
+  automaticReconnectTimer = null;
+  automaticReconnectPolicy.reset();
 }
 
 async function tryAutoConnectMcp(): Promise<void> {
@@ -410,6 +443,7 @@ export function shutdownIpcServices(): Promise<void> {
   shuttingDown = true;
   removeConnectionIssueListener?.();
   removeConnectionIssueListener = null;
+  resetAutomaticReconnectState();
 
   shutdownPromise = (async () => {
     activeConnection?.controller.abort();

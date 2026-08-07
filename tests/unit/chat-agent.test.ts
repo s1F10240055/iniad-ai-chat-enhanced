@@ -146,13 +146,11 @@ describe("ChatAgent", () => {
         message.content.includes("<BEGIN_UNTRUSTED_REFERENCE_DATA>")
       )?.role
     ).toBe("user");
-    expect(body.messages.filter((message: { role: string }) => message.role === "system")).toHaveLength(
-      1
-    );
     expect(
-      body.tools.some(
-        (tool: { function: { name: string } }) => tool.function.name === "web_search"
-      )
+      body.messages.filter((message: { role: string }) => message.role === "system")
+    ).toHaveLength(1);
+    expect(
+      body.tools.some((tool: { function: { name: string } }) => tool.function.name === "web_search")
     ).toBe(false);
     expect(result.citations).toEqual([
       expect.objectContaining({
@@ -161,6 +159,43 @@ describe("ChatAgent", () => {
         sourceType: "moocs",
       }),
     ]);
+  });
+
+  it("deduplicates citations with the material-store URL normalization rules", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { role: "assistant", content: "回答" } }] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const baseMaterial = {
+      content: "ポインタの説明",
+      location: "第1回 / 資料1",
+      sourceType: "moocs" as const,
+      firstReferencedAt: "2026-01-01T00:00:00.000Z",
+      lastReferencedAt: "2026-01-01T00:00:00.000Z",
+      relevanceScore: 1,
+    };
+
+    const agent = new ChatAgent(createMcpMock(), webClient);
+    const result = await agent.chat("以前の資料を踏まえて説明して", settings, undefined, [], {
+      priorMaterials: [
+        {
+          ...baseMaterial,
+          id: "material-1",
+          title: "MOOCs",
+          url: "https://moocs.iniad.org/courses/2026/COS201/01/01",
+        },
+        {
+          ...baseMaterial,
+          id: "material-2",
+          title: "プログラミング言語 第1回",
+          url: "https://moocs.iniad.org/courses/2026/COS201/01/01/#section",
+        },
+      ],
+    });
+
+    expect(result.citations).toHaveLength(1);
+    expect(result.citations[0].title).toBe("プログラミング言語 第1回");
   });
 
   it("does not expose web search after an untrusted syllabus hint is added", async () => {
@@ -186,13 +221,11 @@ describe("ChatAgent", () => {
 
     const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
     expect(
-      body.tools.some(
-        (tool: { function: { name: string } }) => tool.function.name === "web_search"
-      )
+      body.tools.some((tool: { function: { name: string } }) => tool.function.name === "web_search")
     ).toBe(false);
   });
 
-  it("records only material payloads explicitly returned by a tool", async () => {
+  it("does not retain web search snippets as reusable material context", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
@@ -239,13 +272,7 @@ describe("ChatAgent", () => {
     await agent.chat("C言語", settings, undefined, [], {
       onMaterialsRetrieved: (materials) => recorded.push(...materials),
     });
-    expect(recorded).toEqual([
-      expect.objectContaining({
-        title: "C言語資料",
-        content: "ポインタの説明",
-        sourceType: "web",
-      }),
-    ]);
+    expect(recorded).toEqual([]);
   });
 
   it("includes relevant older turns when the user explicitly references an earlier conversation", async () => {
@@ -268,6 +295,80 @@ describe("ChatAgent", () => {
     const contents = body.messages.map((message: { content: string }) => message.content);
     expect(contents).toContain("ポインタはメモリアドレスに関係する");
     expect(contents).not.toContain("別の話題 3");
+  });
+
+  it("keeps the adjacent user and assistant pair for an explicitly referenced older turn", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { role: "assistant", content: "回答" } }] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const history: ChatTurn[] = [
+      {
+        id: "pointer-question",
+        role: "user",
+        content: "ポインタについて質問",
+        timestamp: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        id: "pointer-answer",
+        role: "assistant",
+        content: "メモリアドレスを保持するという回答",
+        timestamp: "2026-01-01T00:01:00.000Z",
+      },
+      ...Array.from({ length: 6 }, (_value, index) => ({
+        id: `unrelated-${index}`,
+        role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+        content: `無関係な話題 ${index}`,
+        timestamp: new Date(2026, 0, index + 2).toISOString(),
+      })),
+    ];
+
+    const agent = new ChatAgent(createMcpMock(), webClient);
+    await agent.chat("以前の会話を踏まえてポインタを説明して", settings, undefined, history);
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    const contents = body.messages.map((message: { content: string }) => message.content);
+    const questionIndex = contents.indexOf("ポインタについて質問");
+    const answerIndex = contents.indexOf("メモリアドレスを保持するという回答");
+    expect(questionIndex).toBeGreaterThan(-1);
+    expect(answerIndex).toBe(questionIndex + 1);
+  });
+
+  it("skips an empty recent turn without dropping older history", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { role: "assistant", content: "回答" } }] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const history: ChatTurn[] = [
+      {
+        id: "older-user",
+        role: "user",
+        content: "前の質問",
+        timestamp: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        id: "older-assistant",
+        role: "assistant",
+        content: "保持されるべき回答",
+        timestamp: "2026-01-01T00:01:00.000Z",
+      },
+      {
+        id: "empty-assistant",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-01-01T00:02:00.000Z",
+      },
+    ];
+
+    const agent = new ChatAgent(createMcpMock(), webClient);
+    await agent.chat("続きを説明して", settings, undefined, history);
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body.messages.map((message: { content: string }) => message.content)).toContain(
+      "保持されるべき回答"
+    );
   });
 
   it("keeps a bounded excerpt of an oversized latest turn for a follow-up", async () => {
@@ -311,10 +412,7 @@ describe("ChatAgent", () => {
     const history: ChatTurn[] = Array.from({ length: 8 }, (_value, index) => ({
       id: `long-turn-${index}`,
       role: index % 2 === 0 ? "user" : "assistant",
-      content:
-        index === 0
-          ? `ポインタの説明 ${"A".repeat(2_500)}重要な結論`
-          : `別の話題 ${index}`,
+      content: index === 0 ? `ポインタの説明 ${"A".repeat(2_500)}重要な結論` : `別の話題 ${index}`,
       timestamp: new Date(2026, 1, index + 1).toISOString(),
     }));
 

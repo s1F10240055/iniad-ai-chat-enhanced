@@ -5,9 +5,9 @@ const rules = require('./webpack.rules');
 
 const runtimeIntegrityPath = path.resolve(__dirname, '.mcp-runtime', 'integrity.json');
 const lectureIndexFiles = ['slides-index.json', 'syllabus-index.json'];
-const isProductionBuild = ['package', 'make', 'publish'].some((command) =>
-  process.argv.includes(command)
-);
+const isProductionBuild =
+  process.env.NODE_ENV === 'production' ||
+  ['package', 'make', 'publish'].some((command) => process.argv.includes(command));
 
 class LectureIndexAssetsPlugin {
   apply(compiler) {

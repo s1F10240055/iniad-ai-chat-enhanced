@@ -5,11 +5,12 @@ import type { Citation } from "../../shared/types/chat";
 import type { SearchResult } from "../../shared/types/search";
 import type { MaterialContextInput } from "./in-memory-store";
 import { MoocsPageReader, type MaterialToolExecutionResult } from "./moocs-page-reader";
+import { inferMoocsLocation } from "./moocs-page-kind";
 import { formatMcpResult, truncate, type ToolExecutionResult } from "./mcp-result";
 
 const MAX_SNAPSHOT_CHARS = 3_000;
 const MAX_WEB_QUERY_CHARS = 500;
-const MAX_MOOCS_URL_CHARS = 2_048;
+const MAX_URL_CHARS = 2_048;
 const MAX_WEB_RESULT_TITLE_CHARS = 200;
 const MAX_WEB_RESULT_SNIPPET_CHARS = 500;
 
@@ -235,14 +236,10 @@ export async function executeAgentTool(
           });
         }
         const content = truncate(lines.join("\n\n") || "No web results");
-        const materials = safeResults.map((resultItem) => ({
-          title: resultItem.title,
-          url: resultItem.url,
-          snippet: resultItem.snippet,
-          sourceType: "web" as const,
-          content: resultItem.snippet,
-        }));
-        return materials.length > 0 ? { content, citations, materials } : { content, citations };
+        // Search snippets are transient discovery metadata, not fetched source
+        // documents. Keep their citations for the current answer, but do not
+        // retain snippets as reusable material context for later conversations.
+        return { content, citations };
       }
 
       default:
@@ -264,7 +261,7 @@ function sanitizeWebSearchResult(result: SearchResult): SearchResult | null {
     typeof result.url !== "string" ||
     typeof result.snippet !== "string" ||
     result.url.length === 0 ||
-    result.url.length > MAX_MOOCS_URL_CHARS
+    result.url.length > MAX_URL_CHARS
   ) {
     return null;
   }
@@ -291,7 +288,7 @@ function sanitizeWebSearchResult(result: SearchResult): SearchResult | null {
 
 function parseMoocsSnapshotMetadata(snapshot: string): { title: string; url: string } | null {
   const url = snapshot.match(/^- Page URL:\s*(\S+)\s*$/m)?.[1];
-  if (!url || url.length > MAX_MOOCS_URL_CHARS || !isMoocsUrl(url)) return null;
+  if (!url || url.length > MAX_URL_CHARS || !isMoocsUrl(url)) return null;
 
   const parsed = new URL(url);
   const rawTitle = snapshot.match(/^- Page Title:\s*(.+)\s*$/m)?.[1]?.trim();
@@ -299,21 +296,6 @@ function parseMoocsSnapshotMetadata(snapshot: string): { title: string; url: str
     title: rawTitle?.slice(0, MAX_WEB_RESULT_TITLE_CHARS) || "MOOCs ページ",
     url: parsed.toString(),
   };
-}
-
-function inferMoocsLocation(url: string): string | undefined {
-  try {
-    const parts = new URL(url).pathname.replace(/\/$/, "").split("/");
-    const coursesIndex = parts.indexOf("courses");
-    const lecture = coursesIndex >= 0 ? parts[coursesIndex + 3] : undefined;
-    const page = coursesIndex >= 0 ? parts[coursesIndex + 4] : undefined;
-    if (!lecture) return undefined;
-    return page
-      ? `第${Number(lecture) || lecture}回 / 資料${Number(page) || page}`
-      : `第${Number(lecture) || lecture}回`;
-  } catch {
-    return undefined;
-  }
 }
 
 async function runMoocsTool(
@@ -358,7 +340,7 @@ function validateAgentToolArguments(
   if (toolName === "moocs_navigate") {
     if (keys.length !== 1 || keys[0] !== "url") return "moocs_navigate accepts only url";
     if (typeof args.url !== "string" || !args.url.trim()) return "url must be a non-empty string";
-    if (args.url.length > MAX_MOOCS_URL_CHARS) return "url is too long";
+    if (args.url.length > MAX_URL_CHARS) return "url is too long";
     return null;
   }
 
@@ -367,7 +349,7 @@ function validateAgentToolArguments(
     if ("url" in args && (typeof args.url !== "string" || !args.url.trim())) {
       return "url must be a non-empty string when provided";
     }
-    if (typeof args.url === "string" && args.url.length > MAX_MOOCS_URL_CHARS) {
+    if (typeof args.url === "string" && args.url.length > MAX_URL_CHARS) {
       return "url is too long";
     }
     return null;

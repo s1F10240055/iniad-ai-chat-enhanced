@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { InMemoryStore, MATERIAL_CONTEXT_LIMITS } from "../../src/main/services/in-memory-store";
+import {
+  InMemoryStore,
+  MATERIAL_CONTEXT_LIMITS,
+  MATERIAL_METADATA_LIMITS,
+} from "../../src/main/services/in-memory-store";
 
 function addMaterial(
   store: InMemoryStore,
@@ -28,10 +32,10 @@ describe("InMemoryStore material context", () => {
 
     store.clearConversationHistory();
     expect(store.getHistory()).toHaveLength(0);
-    expect(store.getMaterialSummaries()).toHaveLength(1);
+    expect(store.getMaterialContextSummaries()).toHaveLength(1);
 
     store.clearMaterialContext();
-    expect(store.getMaterialSummaries()).toHaveLength(0);
+    expect(store.getMaterialContextSummaries()).toHaveLength(0);
   });
 
   it("deduplicates normalized URLs and evicts the oldest entry at the fixed limit", () => {
@@ -39,21 +43,24 @@ describe("InMemoryStore material context", () => {
     for (let i = 0; i < MATERIAL_CONTEXT_LIMITS.maxEntries + 5; i++) {
       addMaterial(store, String(i).padStart(2, "0"), `本文 ${i}`);
     }
+    const latestSuffix = String(MATERIAL_CONTEXT_LIMITS.maxEntries + 4).padStart(2, "0");
 
     expect(store.getMaterialContextCount()).toBe(MATERIAL_CONTEXT_LIMITS.maxEntries);
-    expect(store.getMaterialSummaries().some((item) => item.url.endsWith("/00"))).toBe(false);
+    expect(store.getMaterialContextSummaries().some((item) => item.url.endsWith("/00"))).toBe(
+      false
+    );
 
     store.addMaterial({
       title: "詳細な資料タイトル",
-      url: "https://moocs.iniad.org/courses/2026/COS201/01/34/",
+      url: `https://moocs.iniad.org/courses/2026/COS201/01/${latestSuffix}/`,
       content: "更新された、より詳しい資料本文です。",
-      location: "第1回 / 資料34",
+      location: `第1回 / 資料${latestSuffix}`,
     });
     expect(store.getMaterialContextCount()).toBe(MATERIAL_CONTEXT_LIMITS.maxEntries);
-    expect(store.getMaterialSummaries()[0]).toMatchObject({
+    expect(store.getMaterialContextSummaries()[0]).toMatchObject({
       title: "詳細な資料タイトル",
-      location: "第1回 / 資料34",
-      url: "https://moocs.iniad.org/courses/2026/COS201/01/34",
+      location: `第1回 / 資料${latestSuffix}`,
+      url: `https://moocs.iniad.org/courses/2026/COS201/01/${latestSuffix}`,
     });
   });
 
@@ -118,13 +125,39 @@ describe("InMemoryStore material context", () => {
     });
     store.addMaterial({
       title: "oversized URL",
-      url: `https://example.com/${"x".repeat(2_100)}`,
+      url: `https://example.com/${"x".repeat(MATERIAL_METADATA_LIMITS.maxUrlChars)}`,
       content: "must not be retained",
     });
 
-    const [summary] = store.getMaterialSummaries();
-    expect(summary.title).toHaveLength(300);
-    expect(summary.location).toHaveLength(200);
+    const [summary] = store.getMaterialContextSummaries();
+    expect(summary.title).toHaveLength(MATERIAL_METADATA_LIMITS.maxTitleChars);
+    expect(summary.location).toHaveLength(MATERIAL_METADATA_LIMITS.maxLocationChars);
     expect(store.getMaterialContextCount()).toBe(1);
+  });
+});
+
+describe("InMemoryStore MCP connection state", () => {
+  it("clears stale retry diagnostics when the status becomes connected", () => {
+    const store = new InMemoryStore();
+    const lastConnectedAt = "2026-08-07T12:00:00.000Z";
+    store.setMcpConnectionState({
+      status: "error",
+      lastConnectedAt,
+      attempt: 3,
+      maxAttempts: 3,
+      error: {
+        code: "MCP_CONNECTION_FAILED",
+        message: "接続に失敗しました。",
+        guidance: "再接続してください。",
+        retryable: true,
+      },
+    });
+
+    store.setMcpStatus("connected");
+
+    expect(store.getMcpConnectionState()).toEqual({
+      status: "connected",
+      lastConnectedAt,
+    });
   });
 });

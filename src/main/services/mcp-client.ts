@@ -14,6 +14,7 @@ const TOOL_TIMEOUT_MS = 45_000;
 const MAX_TOOL_TIMEOUT_MS = 90_000;
 const GOOGLE_LOGIN_TIMEOUT_MS = 90_000;
 const CONNECT_TIMEOUT_MS = 30_000;
+const PING_TIMEOUT_MS = 5_000;
 const TOOL_LIST_TIMEOUT_MS = 5_000;
 const LOGIN_TOOL_TIMEOUT_MS = 90_000;
 const MAX_TOOL_LIST_PAGES = 10;
@@ -417,16 +418,21 @@ export class McpClient {
     return () => this.connectionIssueListeners.delete(listener);
   }
 
-  /** 子プロセスが生存し、必要ツールが引き続き利用可能か確認する。 */
+  /** 初期接続時に確認済みの子プロセスが、MCP ping に応答するか確認する。 */
   async ping(signal?: AbortSignal): Promise<boolean> {
     if (!this.client || this.status !== "connected") return false;
 
     try {
-      await this.assertRequiredToolsAvailable(signal);
+      await this.client.ping({
+        timeout: PING_TIMEOUT_MS,
+        maxTotalTimeout: PING_TIMEOUT_MS,
+        signal,
+      });
+      if (signal?.aborted) return false;
       return true;
     } catch (error) {
+      if (signal?.aborted || isAbortError(error)) return false;
       const classified = this.classifyError(error);
-      if (classified.kind === "cancelled") return false;
       this.status = classified.retryable ? "disconnected" : "error";
       await this.cleanupResources();
       this.emitConnectionIssue(classified);
@@ -1021,7 +1027,7 @@ function normalizeToolTimeout(timeoutMs: number): number {
 
 function isAbortError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
-  return error.name === "AbortError" || error.message.toLowerCase().includes("aborted");
+  return error.name === "AbortError" || (error as NodeJS.ErrnoException).code === "ABORT_ERR";
 }
 
 function cancelledError(): McpClientError {

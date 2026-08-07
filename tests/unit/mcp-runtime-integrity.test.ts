@@ -5,20 +5,33 @@ import path from "path";
 import { createRequire } from "module";
 
 const moduleRequire = createRequire(path.resolve("package.json"));
-const { computeRuntimeTreeHash } = moduleRequire("./scripts/copy-mcp-runtime.cjs") as {
+const { buildMcpRuntime, computeRuntimeTreeHash } = moduleRequire(
+  "./scripts/copy-mcp-runtime.cjs"
+) as {
+  buildMcpRuntime(projectDir: string): string;
   computeRuntimeTreeHash(runtimeRoot: string): string;
 };
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    temporaryDirectories.splice(0).map((directory) =>
-      fs.rm(directory, { recursive: true, force: true })
-    )
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => fs.rm(directory, { recursive: true, force: true }))
   );
 });
 
 describe("packaged MCP runtime integrity", () => {
+  it("refuses to write a runtime outside the project that owns the build script", async () => {
+    const directory = await fs.mkdtemp(path.join(tmpdir(), "mcp-runtime-wrong-project-"));
+    temporaryDirectories.push(directory);
+
+    expect(() => buildMcpRuntime(directory)).toThrow(
+      "Refusing to write MCP runtime outside this project"
+    );
+    await expect(fs.access(path.join(directory, ".mcp-runtime"))).rejects.toThrow();
+  });
+
   it("is deterministic and changes when runtime code is modified", async () => {
     const directory = await fs.mkdtemp(path.join(tmpdir(), "mcp-runtime-integrity-"));
     temporaryDirectories.push(directory);
