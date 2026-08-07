@@ -131,7 +131,7 @@ export class ChatAgent {
     // Do not expose an outward web-search capability after untrusted prior/current
     // material has influenced the model. A single initial search may still be used
     // for ordinary questions before any MCP browsing begins.
-    let webSearchAllowed = !syllabusHint && !(context?.priorMaterials?.length);
+    let webSearchAllowed = !syllabusHint && !context?.priorMaterials?.length;
     let mcpExplorationStarted = false;
     for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
       if (signal?.aborted) {
@@ -187,10 +187,7 @@ export class ChatAgent {
               content: `Error: total tool call limit (${MAX_AGENT_TOOL_CALLS}) reached`,
               citations: [],
             };
-          } else if (
-            toolName === "web_search" &&
-            (!webSearchAllowed || mcpExplorationStarted)
-          ) {
+          } else if (toolName === "web_search" && (!webSearchAllowed || mcpExplorationStarted)) {
             toolResult = {
               content:
                 "Error: web_search is unavailable after reference material or MCP output has been provided",
@@ -277,9 +274,10 @@ export class ChatAgent {
     };
 
     if (allowTools) {
-      body.tools = options?.allowWebSearch === false
-        ? MOOCS_AGENT_TOOLS.filter((tool) => tool.function.name !== "web_search")
-        : MOOCS_AGENT_TOOLS;
+      body.tools =
+        options?.allowWebSearch === false
+          ? MOOCS_AGENT_TOOLS.filter((tool) => tool.function.name !== "web_search")
+          : MOOCS_AGENT_TOOLS;
       body.tool_choice = "auto";
     }
 

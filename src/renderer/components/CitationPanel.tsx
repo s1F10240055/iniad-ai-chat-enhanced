@@ -49,7 +49,10 @@ export const CitationPanel: React.FC<CitationPanelProps> = ({ citations }) => {
         {citations.map((citation, index) => {
           const safeUrl = isSafeUrl(citation.url);
           return (
-            <li key={`${citation.url}-${citation.location ?? ""}-${index}`} className="citation-item">
+            <li
+              key={`${citation.url}-${citation.location ?? ""}-${index}`}
+              className="citation-item"
+            >
               <div className="citation-heading">
                 <span className="citation-title">{citation.title}</span>
                 {citation.sourceType && (
@@ -58,7 +61,9 @@ export const CitationPanel: React.FC<CitationPanelProps> = ({ citations }) => {
                   </span>
                 )}
               </div>
-              {citation.location && <div className="citation-location">位置: {citation.location}</div>}
+              {citation.location && (
+                <div className="citation-location">位置: {citation.location}</div>
+              )}
               {citation.snippet && <p className="citation-snippet">{citation.snippet}</p>}
               <div className="citation-link-row">
                 <span className="citation-url" title={citation.url}>

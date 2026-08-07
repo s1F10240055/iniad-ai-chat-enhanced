@@ -379,9 +379,7 @@ export class SettingsStore {
       const encrypted = safeStorage.encryptString(plaintextJson);
       return encrypted.toString("base64");
     }
-    throw new Error(
-      "OS の安全な資格情報ストレージを利用できないため、秘密情報を保存できません"
-    );
+    throw new Error("OS の安全な資格情報ストレージを利用できないため、秘密情報を保存できません");
   }
 
   /**

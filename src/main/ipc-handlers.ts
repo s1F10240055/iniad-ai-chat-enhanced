@@ -1,16 +1,8 @@
 /** Main プロセスでのみ実行する、検証済み IPC ハンドラー。 */
-import {
-  BrowserWindow,
-  ipcMain,
-  shell,
-  type IpcMainInvokeEvent,
-} from "electron";
+import { BrowserWindow, ipcMain, shell, type IpcMainInvokeEvent } from "electron";
 import { AppError, toSerializableError } from "../shared/types/errors";
 import type { ChatResponse, ChatTurn } from "../shared/types/chat";
-import type {
-  ConnectionTestResult,
-  McpConnectionState,
-} from "../shared/types/settings";
+import type { ConnectionTestResult, McpConnectionState } from "../shared/types/settings";
 import { validateChatInput, validateExternalUrl, validateSettingsInput } from "./ipc-validation";
 import { apiRequestJson } from "./services/api-client";
 import { createAppServices } from "./services/app-services";
@@ -32,10 +24,7 @@ export interface RegisterIpcHandlersOptions {
   isTrustedSender: (webContentsId: number) => boolean;
 }
 
-type SecureHandler = (
-  event: IpcMainInvokeEvent,
-  ...args: unknown[]
-) => unknown | Promise<unknown>;
+type SecureHandler = (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown | Promise<unknown>;
 
 const services = createAppServices();
 const { store, mcpClient, chatAgent } = services;
@@ -43,9 +32,10 @@ const { store, mcpClient, chatAgent } = services;
 let handlersRegistered = false;
 let activeController: AbortController | null = null;
 let activeChatCompletion: Promise<void> | null = null;
-let activeConnection:
-  | { controller: AbortController; promise: Promise<McpConnectionResult> }
-  | null = null;
+let activeConnection: {
+  controller: AbortController;
+  promise: Promise<McpConnectionResult>;
+} | null = null;
 let removeConnectionIssueListener: (() => void) | null = null;
 let shuttingDown = false;
 let shutdownPromise: Promise<void> | null = null;
@@ -89,16 +79,9 @@ function secureNoArg(
   });
 }
 
-function assertTrustedSender(
-  event: IpcMainInvokeEvent,
-  options: RegisterIpcHandlersOptions
-): void {
+function assertTrustedSender(event: IpcMainInvokeEvent, options: RegisterIpcHandlersOptions): void {
   const isMainFrame = event.senderFrame === event.sender.mainFrame;
-  if (
-    event.sender.isDestroyed() ||
-    !isMainFrame ||
-    !options.isTrustedSender(event.sender.id)
-  ) {
+  if (event.sender.isDestroyed() || !isMainFrame || !options.isTrustedSender(event.sender.id)) {
     throw new AppError("PERMISSION_DENIED", "この IPC 呼び出しは許可されていません");
   }
 }
@@ -297,12 +280,9 @@ async function connectMcp(signal?: AbortSignal): Promise<McpConnectionResult> {
   if (activeConnection) return waitForConnection(activeConnection.promise, signal);
 
   const controller = new AbortController();
-  const promise = ensureMcpConnected(
-    mcpClient,
-    broadcastMcpState,
-    settingsStore.getRawSettings(),
-    { signal: controller.signal }
-  ).finally(() => {
+  const promise = ensureMcpConnected(mcpClient, broadcastMcpState, settingsStore.getRawSettings(), {
+    signal: controller.signal,
+  }).finally(() => {
     if (activeConnection?.controller === controller) activeConnection = null;
   });
   activeConnection = { controller, promise };
@@ -443,7 +423,10 @@ export function shutdownIpcServices(): Promise<void> {
 async function waitAtMost(promise: Promise<unknown>, timeoutMs: number): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   await Promise.race([
-    promise.then(() => undefined, () => undefined),
+    promise.then(
+      () => undefined,
+      () => undefined
+    ),
     new Promise<void>((resolve) => {
       timer = setTimeout(resolve, timeoutMs);
     }),

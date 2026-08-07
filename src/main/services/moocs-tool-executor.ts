@@ -308,7 +308,9 @@ function inferMoocsLocation(url: string): string | undefined {
     const lecture = coursesIndex >= 0 ? parts[coursesIndex + 3] : undefined;
     const page = coursesIndex >= 0 ? parts[coursesIndex + 4] : undefined;
     if (!lecture) return undefined;
-    return page ? `第${Number(lecture) || lecture}回 / 資料${Number(page) || page}` : `第${Number(lecture) || lecture}回`;
+    return page
+      ? `第${Number(lecture) || lecture}回 / 資料${Number(page) || page}`
+      : `第${Number(lecture) || lecture}回`;
   } catch {
     return undefined;
   }

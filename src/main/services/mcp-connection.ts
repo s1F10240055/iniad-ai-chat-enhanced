@@ -1,8 +1,5 @@
 import { AppError } from "../../shared/types/errors";
-import type {
-  McpConnectionError,
-  McpConnectionState,
-} from "../../shared/types/settings";
+import type { McpConnectionError, McpConnectionState } from "../../shared/types/settings";
 import { McpClientError, type McpClient } from "./mcp-client";
 
 const DEFAULT_MAX_ATTEMPTS = 3;
@@ -85,8 +82,7 @@ async function connectWithRetry(
   options: Required<Omit<McpConnectionOptions, "signal">>,
   signal: AbortSignal
 ): Promise<McpConnectionResult> {
-  let reconnecting =
-    lastConnectedAt.has(mcpClient) || mcpClient.getStatus() !== "disconnected";
+  let reconnecting = lastConnectedAt.has(mcpClient) || mcpClient.getStatus() !== "disconnected";
 
   try {
     if (mcpClient.getStatus() === "connected") {
@@ -160,12 +156,7 @@ async function connectWithRetry(
 
         const connectionError = toConnectionError(error);
         if (!connectionError.retryable || attempt >= options.maxAttempts) {
-          const failedState = errorState(
-            connectionError,
-            attempt,
-            options.maxAttempts,
-            mcpClient
-          );
+          const failedState = errorState(connectionError, attempt, options.maxAttempts, mcpClient);
           broadcastState(failedState);
           return { connected: false, error: connectionError.message, state: failedState };
         }
@@ -179,10 +170,7 @@ async function connectWithRetry(
           maxAttempts: options.maxAttempts,
         });
 
-        const delayMs = Math.min(
-          options.backoffMaxMs,
-          options.backoffBaseMs * 2 ** (attempt - 1)
-        );
+        const delayMs = Math.min(options.backoffMaxMs, options.backoffBaseMs * 2 ** (attempt - 1));
         await waitForRetry(delayMs, signal);
       }
     }
@@ -201,9 +189,7 @@ async function connectWithRetry(
       return { connected: false, state };
     }
 
-    const connectionError = toConnectionError(
-      signal.aborted ? cancelledConnectionError() : error
-    );
+    const connectionError = toConnectionError(signal.aborted ? cancelledConnectionError() : error);
     const state = errorState(connectionError, undefined, options.maxAttempts, mcpClient);
     broadcastState(state);
     return { connected: false, error: connectionError.message, state };

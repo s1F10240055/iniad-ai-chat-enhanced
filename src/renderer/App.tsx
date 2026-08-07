@@ -28,8 +28,7 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
-  const [mcpConnection, setMcpConnection] =
-    useState<McpConnectionState>(INITIAL_MCP_CONNECTION);
+  const [mcpConnection, setMcpConnection] = useState<McpConnectionState>(INITIAL_MCP_CONNECTION);
   const [modelName, setModelName] = useState("GPT-5.4-nano");
   const [currentView, setCurrentView] = useState<ViewType>("chat");
   const [theme, setTheme] = useState<"light" | "dark">("dark");
@@ -172,8 +171,7 @@ const App: React.FC = () => {
       await refreshMaterialContext();
     } catch (error) {
       const errMsg = describeError(error);
-      const wasCancelled =
-        cancelRequestedRef.current || /cancel|abort|キャンセル/i.test(errMsg);
+      const wasCancelled = cancelRequestedRef.current || /cancel|abort|キャンセル/i.test(errMsg);
 
       try {
         setMessages(await window.electronAPI.getChatHistory());
@@ -331,7 +329,10 @@ const App: React.FC = () => {
               <details className="data-menu">
                 <summary className="header-action-button">
                   履歴・資料
-                  <span className="material-count-badge" aria-label={`資料 ${materialContext.length}件`}>
+                  <span
+                    className="material-count-badge"
+                    aria-label={`資料 ${materialContext.length}件`}
+                  >
                     {materialContext.length}
                   </span>
                 </summary>
@@ -448,7 +449,10 @@ const App: React.FC = () => {
       </header>
 
       {notice && (
-        <div className={`app-notice ${notice.type}`} role={notice.type === "error" ? "alert" : "status"}>
+        <div
+          className={`app-notice ${notice.type}`}
+          role={notice.type === "error" ? "alert" : "status"}
+        >
           <span>{notice.text}</span>
           <button type="button" onClick={() => setNotice(null)} aria-label="通知を閉じる">
             ×

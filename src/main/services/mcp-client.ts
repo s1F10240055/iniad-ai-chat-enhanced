@@ -297,9 +297,7 @@ async function resolveMcpRuntime(): Promise<McpRuntime> {
   }
 
   const moduleRequire = createRequire(__filename);
-  const pkgDir = path.dirname(
-    moduleRequire.resolve("@rarandeyo/iniad-moocs-mcp/package.json")
-  );
+  const pkgDir = path.dirname(moduleRequire.resolve("@rarandeyo/iniad-moocs-mcp/package.json"));
   let nodeModulesDir = pkgDir;
   while (
     nodeModulesDir !== path.dirname(nodeModulesDir) &&
@@ -440,7 +438,8 @@ export class McpClient {
     if (error instanceof McpClientError) {
       return error.kind === "transient" || error.kind === "timeout";
     }
-    const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+    const message =
+      error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
     return [
       "not initialized",
       "not connected",
@@ -533,10 +532,7 @@ export class McpClient {
         env: childEnvironment,
         stderr: "ignore",
       });
-      this.client = new Client(
-        { name: "iniad-ai-chat", version: "1.0.0" },
-        { capabilities: {} }
-      );
+      this.client = new Client({ name: "iniad-ai-chat", version: "1.0.0" }, { capabilities: {} });
       this.client.onclose = () => {
         if (this.status !== "connected") return;
         this.status = "disconnected";
@@ -626,7 +622,11 @@ export class McpClient {
       if (signal?.aborted || isAbortError(error)) throw cancelledError();
 
       const classified = this.classifyError(error);
-      if (classified.retryable || classified.kind === "authentication" || classified.kind === "playwright") {
+      if (
+        classified.retryable ||
+        classified.kind === "authentication" ||
+        classified.kind === "playwright"
+      ) {
         this.status = classified.retryable ? "disconnected" : "error";
         await this.cleanupResources();
         this.emitConnectionIssue(classified);
@@ -678,12 +678,7 @@ export class McpClient {
   }
 
   async extractGoogleSlideText(signal?: AbortSignal): Promise<unknown> {
-    return this.callToolSafe(
-      "extractGoogleSlideText",
-      undefined,
-      MAX_TOOL_TIMEOUT_MS,
-      signal
-    );
+    return this.callToolSafe("extractGoogleSlideText", undefined, MAX_TOOL_TIMEOUT_MS, signal);
   }
 
   async getPageSnapshot(signal?: AbortSignal): Promise<string | null> {
@@ -921,7 +916,12 @@ export class McpClient {
   }
 
   private handleToolResultIssue(result: unknown): void {
-    if (!result || typeof result !== "object" || !("isError" in result) || result.isError !== true) {
+    if (
+      !result ||
+      typeof result !== "object" ||
+      !("isError" in result) ||
+      result.isError !== true
+    ) {
       return;
     }
 

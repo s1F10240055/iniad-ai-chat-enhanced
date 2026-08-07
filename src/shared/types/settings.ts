@@ -53,12 +53,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 };
 
 /** MCP 接続状態 */
-export type McpStatus =
-  | "disconnected"
-  | "connecting"
-  | "connected"
-  | "reconnecting"
-  | "error";
+export type McpStatus = "disconnected" | "connecting" | "connected" | "reconnecting" | "error";
 
 /** Renderer に公開してよい、サニタイズ済みの MCP エラー情報 */
 export interface McpConnectionError {
