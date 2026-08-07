@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import type { AppSettings, PublicAppSettings } from "../../shared/types";
-import { DEFAULT_SETTINGS } from "../../shared/types";
+import { DEFAULT_SETTINGS, OFFICIAL_API_HOST } from "../../shared/types";
 
 /** バリデーションエラーの型 */
 interface ValidationErrors {
@@ -33,7 +33,13 @@ const AVAILABLE_MODELS = [
 function isValidURL(url: string): boolean {
   try {
     const parsed = new URL(url);
-    return parsed.protocol === "https:" || parsed.protocol === "http:";
+    return (
+      parsed.protocol === "https:" &&
+      parsed.hostname === OFFICIAL_API_HOST &&
+      !parsed.username &&
+      !parsed.password &&
+      !parsed.port
+    );
   } catch {
     return false;
   }
@@ -87,7 +93,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
 
       // ベースURL
       if (current.baseURL && !isValidURL(current.baseURL)) {
-        errs.baseURL = "有効なURL形式で入力してください";
+        errs.baseURL = "公式 INIAD API の HTTPS URL を入力してください";
       }
 
       // モデル
@@ -363,7 +369,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose }) => {
               className={`settings-input ${errors.baseURL ? "error" : ""}`}
               value={settings.baseURL}
               onChange={(e) => updateField("baseURL", e.target.value)}
-              placeholder="https://api.openai.iniad.org/api/v1"
+              placeholder={DEFAULT_SETTINGS.baseURL}
             />
             {errors.baseURL && <span className="settings-error">{errors.baseURL}</span>}
           </div>

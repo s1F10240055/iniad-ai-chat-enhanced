@@ -3,7 +3,7 @@
   "productName": "iniad-ai-chat-enhanced",
   "version": "1.0.0",
   "description": "My Electron application description",
-  "main": ".webpack/main/index.js",
+  "main": ".webpack/main",
   "private": true,
   "scripts": {
     "start": "electron-forge start",
@@ -19,6 +19,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.config.mts tests/integration",
+    "verify:mcp": "node scripts/verify-mcp-setup.mjs",
+    "verify:mcp:packaged": "node scripts/verify-mcp-setup.mjs --packaged",
     "postinstall": "patch-package",
     "build:syllabus-index": "node scripts/build-syllabus-index.mjs",
     "build:slides-index": "node scripts/build-slides-index.mjs"

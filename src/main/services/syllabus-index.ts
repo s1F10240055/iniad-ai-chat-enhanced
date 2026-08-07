@@ -13,6 +13,8 @@ function resolveDefaultIndexPath(): string {
   const projectRoot = path.resolve(__dirname, "..", "..");
 
   const candidates = [
+    // webpack がアプリ本体（ASAR整合性検証対象）へ同梱する索引
+    path.join(__dirname, "data", "syllabus-index.json"),
     // 開発時: プロジェクトルート/data
     path.join(projectRoot, "data", "syllabus-index.json"),
     // ビルド時: Electron resourcesPath/data
@@ -37,12 +39,12 @@ export class SyllabusIndexService {
 
     try {
       const raw = readFileSync(filePath, "utf-8");
-      this.index = JSON.parse(raw) as SyllabusIndex;
-      console.log(`[SyllabusIndex] Loaded ${this.index.courses.length} courses from ${filePath}`);
-    } catch (err) {
-      console.warn(
-        `[SyllabusIndex] Failed to load index: ${err instanceof Error ? err.message : err}`
-      );
+      const parsed = JSON.parse(raw) as unknown;
+      if (!isSyllabusIndex(parsed)) throw new Error("Invalid syllabus index");
+      this.index = parsed;
+      console.log(`[SyllabusIndex] Loaded ${this.index.courses.length} courses`);
+    } catch {
+      console.warn("[SyllabusIndex] Failed to load index");
       this.index = null;
     }
   }
@@ -124,4 +126,13 @@ export class SyllabusIndexService {
       .split(new RegExp(`${STOP_WORDS.source}|${SPLIT_CHARS.source}`))
       .filter((t) => t.length >= MIN_TOKEN_LENGTH);
   }
+}
+
+function isSyllabusIndex(value: unknown): value is SyllabusIndex {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const courses = (value as { courses?: unknown }).courses;
+  return (
+    Array.isArray(courses) &&
+    courses.every((course) => !!course && typeof course === "object" && !Array.isArray(course))
+  );
 }

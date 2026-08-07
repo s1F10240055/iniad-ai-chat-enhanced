@@ -1,110 +1,581 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio";
+import fs from "fs";
+import { createHash, randomUUID } from "crypto";
 import { createRequire } from "module";
+import os from "os";
 import path from "path";
 import { z } from "zod";
-import { AppError } from "../../shared/types/errors";
+import { AppError, type ErrorCode } from "../../shared/types/errors";
 import type { CourseSummary, LectureLink, SlideLink } from "../../shared/types/search";
 import type { McpStatus } from "../../shared/types/settings";
 
 const TOOL_TIMEOUT_MS = 45_000;
+const MAX_TOOL_TIMEOUT_MS = 90_000;
 const GOOGLE_LOGIN_TIMEOUT_MS = 90_000;
 const CONNECT_TIMEOUT_MS = 30_000;
+const PING_TIMEOUT_MS = 5_000;
+const TOOL_LIST_TIMEOUT_MS = 5_000;
 const LOGIN_TOOL_TIMEOUT_MS = 90_000;
+const MAX_TOOL_LIST_PAGES = 10;
+const MAX_MOOCS_URL_CHARS = 2_048;
+const MCP_RUNTIME_MANIFEST = "runtime.json";
+const MCP_RUNTIME_INTEGRITY_FILE = "integrity.json";
+const MAX_RUNTIME_FILES = 20_000;
+const MAX_RUNTIME_BYTES = 2 * 1024 * 1024 * 1024;
+const MCP_PROFILE_PREFIX = "iniad-ai-chat-mcp-";
+
+declare const __MCP_RUNTIME_TREE_SHA256__: string;
+
+const mcpRuntimeManifestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    nodeExecutable: z.string().min(1).max(1_024),
+    entryScript: z.string().min(1).max(1_024),
+    mcpCli: z.string().min(1).max(1_024),
+    chromiumExecutable: z.string().min(1).max(1_024),
+  })
+  .strict();
+
+interface McpRuntime {
+  nodeExecutable: string;
+  entryScript: string;
+  mcpCli: string;
+  chromiumExecutable: string;
+}
+
+/**
+ * このアプリが利用を許可する MCP ツールの完全な一覧。
+ * Renderer や LLM から渡された名前を、そのまま MCP サーバーへ転送しない。
+ */
+export const REQUIRED_MCP_TOOLS = [
+  "loginToIniadMoocsWithIniadAccount",
+  "listCourses",
+  "browser_navigate",
+  "listLectureLinks",
+  "listSlideLinks",
+  "browser_snapshot",
+  "loginToGoogleWithIniadAccount",
+  "expandSlideTab",
+  "extractGoogleSlideText",
+] as const;
+
+type AllowedMcpTool = (typeof REQUIRED_MCP_TOOLS)[number];
+
+const ALLOWED_MCP_TOOLS = new Set<string>(REQUIRED_MCP_TOOLS);
+const NO_ARGUMENT_TOOLS = new Set<AllowedMcpTool>([
+  "loginToIniadMoocsWithIniadAccount",
+  "listCourses",
+  "listLectureLinks",
+  "listSlideLinks",
+  "browser_snapshot",
+  "loginToGoogleWithIniadAccount",
+  "expandSlideTab",
+  "extractGoogleSlideText",
+]);
+
+/** MCP 子プロセスに引き継いでよい、実行に必要な環境変数だけを列挙する。 */
+const MCP_ENV_ALLOWLIST = [
+  "PATH",
+  "Path",
+  "PATHEXT",
+  "SystemRoot",
+  "SYSTEMROOT",
+  "WINDIR",
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+  "HOME",
+  "USERPROFILE",
+  "LOCALAPPDATA",
+  "APPDATA",
+  "XDG_CACHE_HOME",
+  "PLAYWRIGHT_BROWSERS_PATH",
+  "LANG",
+  "LC_ALL",
+  "TZ",
+] as const;
+
+export type McpFailureKind =
+  | "authentication"
+  | "playwright"
+  | "timeout"
+  | "transient"
+  | "configuration"
+  | "cancelled"
+  | "unknown";
+
+/** 接続マネージャーが再試行可否を安全に判断できる、サニタイズ済みエラー。 */
+export class McpClientError extends AppError {
+  constructor(
+    code: ErrorCode,
+    message: string,
+    readonly kind: McpFailureKind,
+    readonly guidance: string,
+    readonly retryable: boolean
+  ) {
+    super(code, message);
+    this.name = "McpClientError";
+  }
+}
+
+/** process.env 全量を第三者プロセスへ渡さないための境界。 */
+export function buildMcpChildEnvironment(
+  source: NodeJS.ProcessEnv,
+  username: string,
+  password: string
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of MCP_ENV_ALLOWLIST) {
+    const value = source[key];
+    if (typeof value === "string" && value.length > 0) {
+      env[key] = value;
+    }
+  }
+  env.INIAD_USERNAME = username;
+  env.INIAD_PASSWORD = password;
+  return env;
+}
+
+/** Resolve only the Node process that launched a non-Electron development/test command. */
+export function resolveNodeExecutable(): string {
+  if (!process.versions.electron && /^(?:node|node\.exe)$/i.test(path.basename(process.execPath))) {
+    try {
+      const resolved = fs.realpathSync(process.execPath);
+      if (fs.statSync(resolved).isFile() && /^(?:node|node\.exe)$/i.test(path.basename(resolved))) {
+        return resolved;
+      }
+    } catch {
+      // Fall through to the configuration error below.
+    }
+  }
+
+  throw new McpClientError(
+    "MCP_CONNECTION_FAILED",
+    "MCP の実行に必要な Node.js が見つかりません。",
+    "configuration",
+    "開発環境を再構築してください。配布版では同梱された固定ランタイムを使用します。",
+    false
+  );
+}
+
+function runtimeConfigurationError(): McpClientError {
+  return new McpClientError(
+    "MCP_CONNECTION_FAILED",
+    "MCP の安全な実行環境が見つかりません。",
+    "configuration",
+    "アプリを再インストールしてください。開発環境では Chromium を導入してから再起動してください。",
+    false
+  );
+}
+
+function resolveRuntimeFile(runtimeRoot: string, relativePath: string): string {
+  if (path.isAbsolute(relativePath)) throw runtimeConfigurationError();
+
+  try {
+    const realRoot = fs.realpathSync(runtimeRoot);
+    const candidate = path.resolve(realRoot, relativePath);
+    const realCandidate = fs.realpathSync(candidate);
+    const relative = path.relative(realRoot, realCandidate);
+    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      throw runtimeConfigurationError();
+    }
+    if (!fs.statSync(realCandidate).isFile()) throw runtimeConfigurationError();
+    return realCandidate;
+  } catch (error) {
+    if (error instanceof McpClientError) throw error;
+    throw runtimeConfigurationError();
+  }
+}
+
+function getEmbeddedRuntimeTreeHash(): string | undefined {
+  if (
+    typeof __MCP_RUNTIME_TREE_SHA256__ === "string" &&
+    /^[a-f0-9]{64}$/.test(__MCP_RUNTIME_TREE_SHA256__)
+  ) {
+    return __MCP_RUNTIME_TREE_SHA256__;
+  }
+  return undefined;
+}
+
+async function computeRuntimeTreeHash(runtimeRoot: string): Promise<string> {
+  const realRoot = await fs.promises.realpath(runtimeRoot);
+  const hash = createHash("sha256");
+  let fileCount = 0;
+  let totalBytes = 0;
+
+  const visit = async (directory: string): Promise<void> => {
+    const entries = (await fs.promises.readdir(directory, { withFileTypes: true })).sort((a, b) =>
+      a.name < b.name ? -1 : a.name > b.name ? 1 : 0
+    );
+    for (const entry of entries) {
+      const absolutePath = path.join(directory, entry.name);
+      const relativePath = path.relative(realRoot, absolutePath).replaceAll(path.sep, "/");
+      if (relativePath === MCP_RUNTIME_INTEGRITY_FILE) continue;
+
+      const metadata = await fs.promises.lstat(absolutePath);
+      if (metadata.isSymbolicLink()) throw runtimeConfigurationError();
+      if (metadata.isDirectory()) {
+        await visit(absolutePath);
+        continue;
+      }
+      if (!metadata.isFile()) throw runtimeConfigurationError();
+
+      fileCount += 1;
+      totalBytes += metadata.size;
+      if (fileCount > MAX_RUNTIME_FILES || totalBytes > MAX_RUNTIME_BYTES) {
+        throw runtimeConfigurationError();
+      }
+
+      hash.update("file\0");
+      hash.update(relativePath);
+      hash.update("\0");
+      hash.update(String(metadata.size));
+      hash.update("\0");
+      await new Promise<void>((resolve, reject) => {
+        const stream = fs.createReadStream(absolutePath);
+        stream.on("data", (chunk) => hash.update(chunk));
+        stream.on("end", resolve);
+        stream.on("error", reject);
+      });
+      hash.update("\0");
+    }
+  };
+
+  await visit(realRoot);
+  return hash.digest("hex");
+}
+
+async function verifyRuntimeIntegrity(runtimeRoot: string): Promise<void> {
+  if (!process.versions.electron) return;
+  const expected = getEmbeddedRuntimeTreeHash();
+  if (!expected) throw runtimeConfigurationError();
+
+  const realRoot = fs.realpathSync(runtimeRoot);
+  try {
+    const actual = await computeRuntimeTreeHash(realRoot);
+    if (actual !== expected) throw runtimeConfigurationError();
+  } catch (error) {
+    if (error instanceof McpClientError) throw error;
+    throw runtimeConfigurationError();
+  }
+}
+
+async function loadMcpRuntime(runtimeRoot: string): Promise<McpRuntime> {
+  try {
+    const manifestPath = path.join(runtimeRoot, MCP_RUNTIME_MANIFEST);
+    const parsed = mcpRuntimeManifestSchema.safeParse(
+      JSON.parse(fs.readFileSync(manifestPath, "utf8"))
+    );
+    if (!parsed.success) throw runtimeConfigurationError();
+
+    const runtime = {
+      nodeExecutable: resolveRuntimeFile(runtimeRoot, parsed.data.nodeExecutable),
+      entryScript: resolveRuntimeFile(runtimeRoot, parsed.data.entryScript),
+      mcpCli: resolveRuntimeFile(runtimeRoot, parsed.data.mcpCli),
+      chromiumExecutable: resolveRuntimeFile(runtimeRoot, parsed.data.chromiumExecutable),
+    };
+    // Verify immediately before returning executable paths to the spawn call.
+    await verifyRuntimeIntegrity(runtimeRoot);
+    return runtime;
+  } catch (error) {
+    if (error instanceof McpClientError) throw error;
+    throw runtimeConfigurationError();
+  }
+}
+
+async function resolveMcpRuntime(): Promise<McpRuntime> {
+  const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+  if (resourcesPath) {
+    const packagedRuntime = path.join(resourcesPath, ".mcp-runtime");
+    if (fs.existsSync(path.join(packagedRuntime, MCP_RUNTIME_MANIFEST))) {
+      return loadMcpRuntime(packagedRuntime);
+    }
+  }
+
+  if (/[\\/]app\.asar[\\/]/.test(__filename)) {
+    throw runtimeConfigurationError();
+  }
+
+  const moduleRequire = createRequire(__filename);
+  const pkgDir = path.dirname(moduleRequire.resolve("@rarandeyo/iniad-moocs-mcp/package.json"));
+  let nodeModulesDir = pkgDir;
+  while (
+    nodeModulesDir !== path.dirname(nodeModulesDir) &&
+    path.basename(nodeModulesDir) !== "node_modules"
+  ) {
+    nodeModulesDir = path.dirname(nodeModulesDir);
+  }
+
+  if (path.basename(nodeModulesDir) !== "node_modules") {
+    throw runtimeConfigurationError();
+  }
+
+  if (process.versions.electron) {
+    const generatedRuntime = path.join(path.dirname(nodeModulesDir), ".mcp-runtime");
+    if (fs.existsSync(path.join(generatedRuntime, MCP_RUNTIME_MANIFEST))) {
+      return loadMcpRuntime(generatedRuntime);
+    }
+    throw runtimeConfigurationError();
+  }
+
+  const projectRoot = path.dirname(nodeModulesDir);
+  const playwright = moduleRequire("playwright") as {
+    chromium: { executablePath(): string };
+  };
+  const chromiumExecutable = fs.realpathSync(playwright.chromium.executablePath());
+  return {
+    nodeExecutable: resolveNodeExecutable(),
+    entryScript: fs.realpathSync(path.join(projectRoot, "scripts", "mcp-runtime-entry.cjs")),
+    mcpCli: fs.realpathSync(path.join(pkgDir, "cli.js")),
+    chromiumExecutable,
+  };
+}
+
+/** ツール名と引数を固定 allowlist に照らし、MCPへ渡してよい形だけを返す。 */
+export function validateMcpToolCall(
+  toolName: string,
+  args?: Record<string, unknown>
+): { name: AllowedMcpTool; arguments?: Record<string, unknown> } {
+  if (!ALLOWED_MCP_TOOLS.has(toolName)) {
+    throw new AppError("PERMISSION_DENIED", "許可されていない MCP ツールです。");
+  }
+
+  const name = toolName as AllowedMcpTool;
+  if (NO_ARGUMENT_TOOLS.has(name)) {
+    if (args !== undefined && (!isPlainRecord(args) || Object.keys(args).length > 0)) {
+      throw new AppError("INVALID_INPUT", "MCP ツールの引数が不正です。");
+    }
+    return { name, arguments: args === undefined ? undefined : {} };
+  }
+
+  if (name === "browser_navigate") {
+    if (!isPlainRecord(args) || Object.keys(args).length !== 1 || typeof args.url !== "string") {
+      throw new AppError("INVALID_INPUT", "MCP ナビゲーション引数が不正です。");
+    }
+
+    const rawUrl = args.url.trim();
+    if (
+      rawUrl.length === 0 ||
+      rawUrl.length > MAX_MOOCS_URL_CHARS ||
+      [...rawUrl].some((character) => {
+        const codePoint = character.charCodeAt(0);
+        return codePoint <= 0x1f || codePoint === 0x7f;
+      })
+    ) {
+      throw new AppError("INVALID_INPUT", "MCP ナビゲーション URL が不正です。");
+    }
+
+    let parsed: URL;
+    try {
+      parsed = new URL(rawUrl);
+    } catch {
+      throw new AppError("INVALID_INPUT", "MCP ナビゲーション URL が不正です。");
+    }
+
+    if (
+      parsed.protocol !== "https:" ||
+      parsed.hostname !== "moocs.iniad.org" ||
+      (parsed.port !== "" && parsed.port !== "443") ||
+      parsed.username !== "" ||
+      parsed.password !== ""
+    ) {
+      throw new AppError("PERMISSION_DENIED", "MOOCs 以外の URL への移動は許可されていません。");
+    }
+
+    return { name, arguments: { url: rawUrl } };
+  }
+
+  // AllowedMcpTool を追加したのに validator を追加し忘れた場合も default deny。
+  throw new AppError("PERMISSION_DENIED", "MCP ツールの検証規則がありません。");
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
 
 export class McpClient {
   private status: McpStatus = "disconnected";
   private client: Client | null = null;
   private transport: StdioClientTransport | null = null;
+  private connectInFlight: Promise<void> | null = null;
+  private connectAbortController: AbortController | null = null;
+  private browserProfileDirectory: string | null = null;
+  private readonly connectionIssueListeners = new Set<(error: McpClientError) => void>();
 
   getStatus(): McpStatus {
     return this.status;
   }
 
-  /** 子プロセスが生存し、ツール一覧が取得できるか確認する */
-  async ping(): Promise<boolean> {
+  /**
+   * 接続後の transport 切断や認証切れを Main の状態管理へ通知する。
+   * Renderer に Client やツール実行権限を公開するものではない。
+   */
+  onConnectionIssue(listener: (error: McpClientError) => void): () => void {
+    this.connectionIssueListeners.add(listener);
+    return () => this.connectionIssueListeners.delete(listener);
+  }
+
+  /** 初期接続時に確認済みの子プロセスが、MCP ping に応答するか確認する。 */
+  async ping(signal?: AbortSignal): Promise<boolean> {
     if (!this.client || this.status !== "connected") return false;
 
     try {
-      await this.client.request(
-        { method: "tools/list", params: {} },
-        z.object({ tools: z.any() }),
-        { timeout: 5_000 }
-      );
+      await this.client.ping({
+        timeout: PING_TIMEOUT_MS,
+        maxTotalTimeout: PING_TIMEOUT_MS,
+        signal,
+      });
+      if (signal?.aborted) return false;
       return true;
-    } catch {
-      this.status = "disconnected";
+    } catch (error) {
+      if (signal?.aborted || isAbortError(error)) return false;
+      const classified = this.classifyError(error);
+      this.status = classified.retryable ? "disconnected" : "error";
       await this.cleanupResources();
+      this.emitConnectionIssue(classified);
       return false;
     }
   }
 
   isConnectionError(error: unknown): boolean {
-    const message = error instanceof Error ? error.message : String(error);
-    return (
-      message.includes("not initialized") ||
-      message.includes("not connected") ||
-      message.includes("Connection closed") ||
-      message.includes("ECONNRESET") ||
-      message.includes("EPIPE") ||
-      message.includes("spawn") ||
-      message.includes("ENOENT")
-    );
+    if (error instanceof McpClientError) {
+      return error.kind === "transient" || error.kind === "timeout";
+    }
+    const message =
+      error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+    return [
+      "not initialized",
+      "not connected",
+      "connection closed",
+      "econnreset",
+      "econnrefused",
+      "enetwork",
+      "enetunreach",
+      "ehostunreach",
+      "eai_again",
+      "epipe",
+      "socket closed",
+    ].some((marker) => message.includes(marker));
   }
 
-  async connect(username: string, password: string): Promise<void> {
-    if (this.status === "connected" || this.status === "connecting") {
-      await this.disconnect();
+  async connect(username: string, password: string, signal?: AbortSignal): Promise<void> {
+    if (this.status === "connected") return;
+    if (this.connectInFlight) return this.connectInFlight;
+
+    if (
+      typeof username !== "string" ||
+      typeof password !== "string" ||
+      username.trim().length === 0 ||
+      password.length === 0 ||
+      username.length > 320 ||
+      password.length > 4_096
+    ) {
+      throw new McpClientError(
+        "MCP_AUTH_FAILED",
+        "MOOCs 認証情報が設定されていないか、形式が不正です。",
+        "authentication",
+        "設定画面で学籍番号とパスワードを確認し、再入力してください。",
+        false
+      );
     }
 
+    const operation = this.connectInternal(username.trim(), password, signal);
+    this.connectInFlight = operation;
+    void operation.then(
+      () => {
+        if (this.connectInFlight === operation) this.connectInFlight = null;
+      },
+      () => {
+        if (this.connectInFlight === operation) this.connectInFlight = null;
+      }
+    );
+    return operation;
+  }
+
+  private async connectInternal(
+    username: string,
+    password: string,
+    callerSignal?: AbortSignal
+  ): Promise<void> {
     this.status = "connecting";
+    const controller = new AbortController();
+    this.connectAbortController = controller;
+    const abortFromCaller = () => controller.abort(callerSignal?.reason);
+
+    if (callerSignal?.aborted) abortFromCaller();
+    else callerSignal?.addEventListener("abort", abortFromCaller, { once: true });
 
     try {
-      const require = createRequire(__filename);
-      const pkgDir = path.dirname(require.resolve("@rarandeyo/iniad-moocs-mcp/package.json"));
-      const cliPath = path.join(pkgDir, "cli.js");
+      if (controller.signal.aborted) throw cancelledError();
 
-      // Playwright のバンドル Chromium を使用（Electron バイナリは使用不可）
+      // 認証エラー等で transport が残った状態からの手動再接続にも安全に対応する。
+      await this.cleanupResources();
+
+      const runtime = await resolveMcpRuntime();
+      const childEnvironment = buildMcpChildEnvironment(process.env, username, password);
+      const browserProfileDirectory = path.join(
+        os.tmpdir(),
+        `${MCP_PROFILE_PREFIX}${process.pid}-${randomUUID()}`
+      );
+      this.browserProfileDirectory = browserProfileDirectory;
+
       this.transport = new StdioClientTransport({
-        command: "node",
-        args: [cliPath, "--headless"],
-        env: {
-          ...process.env,
-          INIAD_USERNAME: username,
-          INIAD_PASSWORD: password,
-        },
+        command: runtime.nodeExecutable,
+        args: [
+          runtime.entryScript,
+          runtime.mcpCli,
+          "--headless",
+          "--browser",
+          "chromium",
+          "--executable-path",
+          runtime.chromiumExecutable,
+          "--user-data-dir",
+          browserProfileDirectory,
+        ],
+        env: childEnvironment,
+        stderr: "ignore",
+      });
+      this.client = new Client({ name: "iniad-ai-chat", version: "1.0.0" }, { capabilities: {} });
+      this.client.onclose = () => {
+        if (this.status !== "connected") return;
+        this.status = "disconnected";
+        this.emitConnectionIssue(
+          new McpClientError(
+            "MCP_CONNECTION_FAILED",
+            "MCP サーバーとの接続が切断されました。",
+            "transient",
+            "自動再接続を試行します。改善しない場合はネットワークを確認してください。",
+            true
+          )
+        );
+      };
+
+      await this.client.connect(this.transport, {
+        timeout: CONNECT_TIMEOUT_MS,
+        maxTotalTimeout: CONNECT_TIMEOUT_MS,
+        signal: controller.signal,
       });
 
-      this.client = new Client({ name: "iniad-ai-chat", version: "1.0.0" }, { capabilities: {} });
-
-      console.log(`[McpClient] Connecting to MCP server... (cliPath: ${cliPath})`);
-      console.log(`[McpClient] Username provided: ${username ? "yes" : "NO"}`);
-      await Promise.race([
-        this.client.connect(this.transport),
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () => reject(new Error(`Connection timed out after ${CONNECT_TIMEOUT_MS / 1000}s`)),
-            CONNECT_TIMEOUT_MS
-          )
-        ),
-      ]);
-
-      console.log(`[McpClient] Connected successfully`);
+      // initialize handshake の成功だけでは接続済みにしない。
+      await this.assertRequiredToolsAvailable(controller.signal);
       this.status = "connected";
     } catch (error) {
-      this.status = "disconnected";
-      console.error(
-        `[McpClient] Connection failed:`,
-        error instanceof Error ? error.message : error
-      );
+      this.status = controller.signal.aborted ? "disconnected" : "error";
       await this.cleanupResources();
-      throw this.classifyError(error);
+      throw controller.signal.aborted ? cancelledError() : this.classifyError(error);
+    } finally {
+      callerSignal?.removeEventListener("abort", abortFromCaller);
+      if (this.connectAbortController === controller) this.connectAbortController = null;
     }
   }
 
   async disconnect(): Promise<void> {
-    await this.cleanupResources();
+    this.connectAbortController?.abort();
     this.status = "disconnected";
+    await this.cleanupResources();
   }
 
   // ── ツール呼び出し ──────────────────────────────
@@ -112,80 +583,112 @@ export class McpClient {
   async callToolSafe(
     toolName: string,
     args?: Record<string, unknown>,
-    timeoutMs = TOOL_TIMEOUT_MS
+    timeoutMs = TOOL_TIMEOUT_MS,
+    signal?: AbortSignal
   ): Promise<unknown> {
-    if (!this.client) {
-      throw new Error("MCP client is not initialized");
+    if (!this.client || this.status !== "connected") {
+      throw new McpClientError(
+        "MCP_CONNECTION_FAILED",
+        "MCP に接続されていません。",
+        "transient",
+        "MCP を再接続してから、もう一度お試しください。",
+        true
+      );
     }
+    if (signal?.aborted) throw cancelledError();
 
-    console.log(`[McpClient] callToolSafe: "${toolName}"`, args ?? {});
+    const validated = validateMcpToolCall(toolName, args);
+    const boundedTimeout = normalizeToolTimeout(timeoutMs);
+
     try {
-      const result = await this.client.callTool({ name: toolName, arguments: args }, undefined, {
-        timeout: timeoutMs,
-      });
-      console.log(`[McpClient] callToolSafe "${toolName}" succeeded`);
+      const requestOptions = {
+        timeout: boundedTimeout,
+        maxTotalTimeout: boundedTimeout,
+        signal,
+      };
+      // iniad-moocs-mcp 0.0.4 returns schemas that the current SDK rejects.
+      // Send exactly one protocol request after our own allowlist/schema checks;
+      // retrying callTool() after response validation could execute a tool twice.
+      const result: unknown = await this.client.request(
+        {
+          method: "tools/call",
+          params: { name: validated.name, arguments: validated.arguments ?? {} },
+        },
+        z
+          .object({
+            content: z.array(z.unknown()).optional(),
+            isError: z.boolean().optional(),
+          })
+          .passthrough(),
+        requestOptions
+      );
+      this.handleToolResultIssue(result);
       return result;
-    } catch (callToolError) {
-      const errMsg = callToolError instanceof Error ? callToolError.message : "";
-      console.warn(`[McpClient] callToolSafe "${toolName}" error:`, errMsg);
+    } catch (error) {
+      if (signal?.aborted || isAbortError(error)) throw cancelledError();
 
+      const classified = this.classifyError(error);
       if (
-        errMsg.includes("validation") ||
-        errMsg.includes("parse") ||
-        errMsg.includes("schema") ||
-        errMsg.includes("safeParse")
+        classified.retryable ||
+        classified.kind === "authentication" ||
+        classified.kind === "playwright"
       ) {
-        return await this.client.request(
-          { method: "tools/call", params: { name: toolName, arguments: args ?? {} } },
-          z.any(),
-          { timeout: timeoutMs }
-        );
+        this.status = classified.retryable ? "disconnected" : "error";
+        await this.cleanupResources();
+        this.emitConnectionIssue(classified);
       }
-
-      throw callToolError;
+      throw classified;
     }
   }
 
-  async loginToMoocs(): Promise<unknown> {
-    return this.callToolSafe("loginToIniadMoocsWithIniadAccount", undefined, LOGIN_TOOL_TIMEOUT_MS);
+  async loginToMoocs(signal?: AbortSignal): Promise<unknown> {
+    return this.callToolSafe(
+      "loginToIniadMoocsWithIniadAccount",
+      undefined,
+      LOGIN_TOOL_TIMEOUT_MS,
+      signal
+    );
   }
 
-  async fetchCourses(): Promise<CourseSummary[]> {
-    const result = await this.callToolSafe("listCourses");
+  async fetchCourses(signal?: AbortSignal): Promise<CourseSummary[]> {
+    const result = await this.callToolSafe("listCourses", undefined, TOOL_TIMEOUT_MS, signal);
     return this.parseToolResult<CourseSummary>(result);
   }
 
-  async navigateTo(url: string): Promise<void> {
-    await this.callToolSafe("browser_navigate", { url });
+  async navigateTo(url: string, signal?: AbortSignal): Promise<void> {
+    await this.callToolSafe("browser_navigate", { url }, TOOL_TIMEOUT_MS, signal);
   }
 
-  async fetchLectureLinks(): Promise<LectureLink[]> {
-    const result = await this.callToolSafe("listLectureLinks");
+  async fetchLectureLinks(signal?: AbortSignal): Promise<LectureLink[]> {
+    const result = await this.callToolSafe("listLectureLinks", undefined, TOOL_TIMEOUT_MS, signal);
     return this.parseToolResult<LectureLink>(result);
   }
 
-  async fetchSlideLinks(): Promise<SlideLink[]> {
-    const result = await this.callToolSafe("listSlideLinks");
+  async fetchSlideLinks(signal?: AbortSignal): Promise<SlideLink[]> {
+    const result = await this.callToolSafe("listSlideLinks", undefined, TOOL_TIMEOUT_MS, signal);
     return this.parseToolResult<SlideLink>(result);
   }
 
-  /**
-   * 現在のページのアクセシビリティスナップショット（テキスト）を取得する
-   */
-  async loginToGoogle(): Promise<void> {
-    await this.callToolSafe("loginToGoogleWithIniadAccount", undefined, GOOGLE_LOGIN_TIMEOUT_MS);
+  /** 現在のページのアクセシビリティスナップショット（テキスト）を取得する。 */
+  async loginToGoogle(signal?: AbortSignal): Promise<void> {
+    await this.callToolSafe(
+      "loginToGoogleWithIniadAccount",
+      undefined,
+      GOOGLE_LOGIN_TIMEOUT_MS,
+      signal
+    );
   }
 
-  async expandSlideTab(): Promise<void> {
-    await this.callToolSafe("expandSlideTab");
+  async expandSlideTab(signal?: AbortSignal): Promise<void> {
+    await this.callToolSafe("expandSlideTab", undefined, TOOL_TIMEOUT_MS, signal);
   }
 
-  async extractGoogleSlideText(): Promise<unknown> {
-    return this.callToolSafe("extractGoogleSlideText", undefined, 90_000);
+  async extractGoogleSlideText(signal?: AbortSignal): Promise<unknown> {
+    return this.callToolSafe("extractGoogleSlideText", undefined, MAX_TOOL_TIMEOUT_MS, signal);
   }
 
-  async getPageSnapshot(): Promise<string | null> {
-    const result = await this.callToolSafe("browser_snapshot");
+  async getPageSnapshot(signal?: AbortSignal): Promise<string | null> {
+    const result = await this.callToolSafe("browser_snapshot", undefined, TOOL_TIMEOUT_MS, signal);
     const typedResult = result as { content?: Array<{ type: string; text?: string }> } | undefined;
     if (!typedResult?.content) return null;
     for (const item of typedResult.content) {
@@ -226,41 +729,313 @@ export class McpClient {
     return [];
   }
 
-  // ── エラー分類 ──────────────────────────────────
+  // ── 接続確認・エラー分類 ──────────────────────────
 
-  private classifyError(error: unknown): AppError {
-    if (error instanceof AppError) return error;
+  private async assertRequiredToolsAvailable(signal?: AbortSignal): Promise<void> {
+    if (!this.client) {
+      throw new McpClientError(
+        "MCP_CONNECTION_FAILED",
+        "MCP クライアントが初期化されていません。",
+        "transient",
+        "MCP を再接続してください。",
+        true
+      );
+    }
+
+    const available = new Set<string>();
+    let cursor: string | undefined;
+    for (let page = 0; page < MAX_TOOL_LIST_PAGES; page++) {
+      if (signal?.aborted) throw cancelledError();
+      const result = await this.listToolsPage(cursor, signal);
+
+      if (!Array.isArray(result.tools)) {
+        throw new McpClientError(
+          "INVALID_RESPONSE",
+          "MCP サーバーのツール一覧が不正です。",
+          "configuration",
+          "MCP サーバーを更新または再インストールしてください。",
+          false
+        );
+      }
+      for (const tool of result.tools) {
+        if (tool && typeof tool.name === "string") available.add(tool.name);
+      }
+
+      cursor = typeof result.nextCursor === "string" ? result.nextCursor : undefined;
+      if (!cursor) break;
+      if (page === MAX_TOOL_LIST_PAGES - 1) {
+        throw new McpClientError(
+          "INVALID_RESPONSE",
+          "MCP サーバーのツール一覧が大きすぎます。",
+          "configuration",
+          "MCP サーバーの設定を確認してください。",
+          false
+        );
+      }
+    }
+
+    const missing = REQUIRED_MCP_TOOLS.filter((tool) => !available.has(tool));
+    if (missing.length > 0) {
+      throw new McpClientError(
+        "MCP_TOOLS_UNAVAILABLE",
+        `MCP サーバーに必要なツールがありません: ${missing.join(", ")}`,
+        "configuration",
+        "MCP サーバーを更新または再インストールしてください。",
+        false
+      );
+    }
+  }
+
+  private async listToolsPage(
+    cursor: string | undefined,
+    signal?: AbortSignal
+  ): Promise<{ tools: Array<{ name: string }>; nextCursor?: string }> {
+    if (!this.client) {
+      throw new AppError("MCP_CONNECTION_FAILED", "MCP クライアントが初期化されていません。");
+    }
+    const params = cursor ? { cursor } : {};
+    const requestOptions = {
+      timeout: TOOL_LIST_TIMEOUT_MS,
+      maxTotalTimeout: TOOL_LIST_TIMEOUT_MS,
+      signal,
+    };
+    return this.client.request(
+      { method: "tools/list", params },
+      z
+        .object({
+          tools: z.array(z.object({ name: z.string() }).passthrough()),
+          nextCursor: z.string().optional(),
+        })
+        .passthrough(),
+      requestOptions
+    );
+  }
+
+  private classifyError(error: unknown): McpClientError {
+    if (error instanceof McpClientError) return error;
+
+    if (error instanceof AppError) {
+      return new McpClientError(
+        error.code,
+        error.message,
+        error.code === "CHAT_CANCELLED" ? "cancelled" : "unknown",
+        error.code === "CHAT_CANCELLED"
+          ? "必要であれば、もう一度接続してください。"
+          : "MCP の設定を確認して、もう一度お試しください。",
+        false
+      );
+    }
 
     const message = error instanceof Error ? error.message : String(error);
+    const normalized = message.toLowerCase();
 
-    if (message.includes("timed out") || message.includes("ETIMEDOUT")) {
-      return new AppError("MCP_TIMEOUT", `MCP connection timed out: ${message}`);
-    }
+    if (isAbortError(error)) return cancelledError();
+
     if (
-      message.includes("ENOENT") ||
-      message.includes("spawn") ||
-      message.includes("module not found")
+      [
+        "unauthorized",
+        "forbidden",
+        "authentication failed",
+        "invalid credential",
+        "login failed",
+        "http 401",
+        "http 403",
+        "認証に失敗",
+        "パスワードが正しく",
+      ].some((marker) => normalized.includes(marker))
     ) {
-      return new AppError("MCP_CONNECTION_FAILED", `MCP server failed to start: ${message}`);
+      return new McpClientError(
+        "MCP_AUTH_FAILED",
+        "MOOCs の認証に失敗しました。",
+        "authentication",
+        "設定画面で学籍番号とパスワードを再入力してください。",
+        false
+      );
     }
 
-    return new AppError("MCP_CONNECTION_FAILED", `MCP connection failed: ${message}`);
+    if (
+      [
+        "playwright",
+        "browsertype.launch",
+        "browser executable",
+        "executable doesn't exist",
+        "executable does not exist",
+        "chromium executable",
+      ].some((marker) => normalized.includes(marker))
+    ) {
+      return new McpClientError(
+        "PLAYWRIGHT_NOT_INSTALLED",
+        "MCP のブラウザー実行環境が見つかりません。",
+        "playwright",
+        "アプリを再インストールしてください。開発環境では `npm exec playwright install chromium` を実行して再起動してください。",
+        false
+      );
+    }
+
+    if (
+      normalized.includes("timed out") ||
+      normalized.includes("timeout") ||
+      normalized.includes("etimedout") ||
+      normalized.includes("requesttimeout")
+    ) {
+      return new McpClientError(
+        "MCP_TIMEOUT",
+        "MCP サーバーへの接続またはツール実行がタイムアウトしました。",
+        "timeout",
+        "ネットワーク状態を確認してください。自動再接続も試行されます。",
+        true
+      );
+    }
+
+    if (this.isConnectionError(error)) {
+      return new McpClientError(
+        "MCP_CONNECTION_FAILED",
+        "MCP サーバーとの接続が一時的に失われました。",
+        "transient",
+        "ネットワーク状態を確認してください。自動再接続も試行されます。",
+        true
+      );
+    }
+
+    if (
+      normalized.includes("enoent") ||
+      normalized.includes("spawn") ||
+      normalized.includes("module not found") ||
+      normalized.includes("cannot find module")
+    ) {
+      return new McpClientError(
+        "MCP_CONNECTION_FAILED",
+        "MCP サーバーを起動できませんでした。",
+        "configuration",
+        "アプリを再インストールしてください。開発環境では依存パッケージを再構築してください。",
+        false
+      );
+    }
+
+    return new McpClientError(
+      "MCP_CONNECTION_FAILED",
+      "MCP サーバーへの接続に失敗しました。",
+      "unknown",
+      "MCP の設定とネットワーク状態を確認して、もう一度お試しください。",
+      false
+    );
+  }
+
+  private handleToolResultIssue(result: unknown): void {
+    if (
+      !result ||
+      typeof result !== "object" ||
+      !("isError" in result) ||
+      result.isError !== true
+    ) {
+      return;
+    }
+
+    const content = "content" in result && Array.isArray(result.content) ? result.content : [];
+    const text = content
+      .filter(
+        (item): item is { type: string; text: string } =>
+          !!item &&
+          typeof item === "object" &&
+          "type" in item &&
+          item.type === "text" &&
+          "text" in item &&
+          typeof item.text === "string"
+      )
+      .map((item) => item.text)
+      .join("\n");
+
+    const classified = this.classifyError(new Error(text));
+    if (
+      classified.kind !== "authentication" &&
+      classified.kind !== "playwright" &&
+      classified.kind !== "timeout" &&
+      classified.kind !== "transient"
+    ) {
+      throw new McpClientError(
+        "MCP_CONNECTION_FAILED",
+        "MCP ツールの実行に失敗しました。",
+        "unknown",
+        "操作をやり直してください。繰り返し失敗する場合は MCP を再接続してください。",
+        false
+      );
+    }
+    // Raw MCP error text may contain credentials or personal data. Throw only the
+    // classified, sanitized error; callToolSafe performs state cleanup and notification.
+    throw classified;
+  }
+
+  private emitConnectionIssue(error: McpClientError): void {
+    for (const listener of this.connectionIssueListeners) {
+      try {
+        listener(error);
+      } catch {
+        // 状態通知先の失敗で MCP クリーンアップを妨げない。
+      }
+    }
   }
 
   // ── クリーンアップ ──────────────────────────────
 
   private async cleanupResources(): Promise<void> {
-    try {
-      await this.client?.close();
-    } catch {
-      // クリーンアップエラーは無視
-    }
-    try {
-      this.transport?.close?.();
-    } catch {
-      // クリーンアップエラーは無視
-    }
+    const client = this.client;
+    const transport = this.transport;
+    const browserProfileDirectory = this.browserProfileDirectory;
     this.client = null;
     this.transport = null;
+    this.browserProfileDirectory = null;
+
+    try {
+      await client?.close();
+    } catch {
+      // クリーンアップエラーは秘密情報を含み得るためログへ出さない。
+    }
+    try {
+      await transport?.close?.();
+    } catch {
+      // クリーンアップエラーは秘密情報を含み得るためログへ出さない。
+    }
+    await removeMcpBrowserProfile(browserProfileDirectory);
   }
+}
+
+async function removeMcpBrowserProfile(profileDirectory: string | null): Promise<void> {
+  if (!profileDirectory) return;
+  const tempRoot = path.resolve(os.tmpdir());
+  const resolvedProfile = path.resolve(profileDirectory);
+  const relative = path.relative(tempRoot, resolvedProfile);
+  if (
+    relative === "" ||
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative) ||
+    !path.basename(resolvedProfile).startsWith(MCP_PROFILE_PREFIX)
+  ) {
+    return;
+  }
+  try {
+    await fs.promises.rm(resolvedProfile, { recursive: true, force: true });
+  } catch {
+    // A locked profile is left for the OS temporary-directory cleanup policy.
+  }
+}
+
+function normalizeToolTimeout(timeoutMs: number): number {
+  if (!Number.isFinite(timeoutMs)) return TOOL_TIMEOUT_MS;
+  return Math.min(MAX_TOOL_TIMEOUT_MS, Math.max(1_000, Math.trunc(timeoutMs)));
+}
+
+function isAbortError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.name === "AbortError" || (error as NodeJS.ErrnoException).code === "ABORT_ERR";
+}
+
+function cancelledError(): McpClientError {
+  return new McpClientError(
+    "CHAT_CANCELLED",
+    "MCP 操作がキャンセルされました。",
+    "cancelled",
+    "必要であれば、もう一度接続してください。",
+    false
+  );
 }

@@ -12,7 +12,8 @@ import type {
   AppStatus,
   PartialAppSettings,
   ConnectionTestResult,
-  McpStatus,
+  McpConnectionState,
+  MaterialContextSummary,
 } from "../shared/types";
 
 export interface ElectronAPI {
@@ -23,6 +24,9 @@ export interface ElectronAPI {
   // ── 会話履歴 ──
   getChatHistory: () => Promise<ChatTurn[]>;
   clearHistory: () => Promise<void>;
+  startNewChat: () => Promise<void>;
+  getMaterialContext: () => Promise<MaterialContextSummary[]>;
+  clearMaterialContext: () => Promise<void>;
 
   // ── ステータス ──
   getStatus: () => Promise<AppStatus>;
@@ -32,9 +36,11 @@ export interface ElectronAPI {
   saveSettings: (settings: PartialAppSettings) => Promise<void>;
   testApiConnection: () => Promise<ConnectionTestResult>;
   testMcpConnection: () => Promise<ConnectionTestResult>;
+  reconnectMcp: () => Promise<ConnectionTestResult>;
+  openExternalUrl: (url: string) => Promise<boolean>;
 
   // ── イベントリスナ ──
-  onMcpStatusChange: (callback: (status: McpStatus) => void) => () => void;
+  onMcpStatusChange: (callback: (status: McpConnectionState) => void) => () => void;
 }
 
 declare global {

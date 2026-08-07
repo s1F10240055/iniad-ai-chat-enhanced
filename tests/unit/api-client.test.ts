@@ -24,8 +24,21 @@ describe("api-client", () => {
   });
 
   it("normalizes the base URL and endpoint path", () => {
-    expect(buildApiUrl("https://api.example.com/v1/", "/models")).toBe(
-      "https://api.example.com/v1/models"
+    expect(buildApiUrl("https://api.openai.iniad.org/api/v1/", "/models")).toBe(
+      "https://api.openai.iniad.org/api/v1/models"
+    );
+  });
+
+  it("rejects non-official or insecure API destinations at the request boundary", () => {
+    expect(() => buildApiUrl("https://api.example.com/v1", "models")).toThrow("公式 INIAD API");
+    expect(() => buildApiUrl("http://api.openai.iniad.org/api/v1", "models")).toThrow(
+      "公式 INIAD API"
+    );
+    expect(() =>
+      buildApiUrl("https://user:password@api.openai.iniad.org/api/v1", "models")
+    ).toThrow("公式 INIAD API");
+    expect(() => buildApiUrl("https://api.openai.iniad.org:8443/api/v1", "models")).toThrow(
+      "公式 INIAD API"
     );
   });
 
@@ -40,7 +53,7 @@ describe("api-client", () => {
     await expect(
       apiRequestJson({
         apiKey: "sk-secret-value",
-        baseURL: "https://api.example.com/v1",
+        baseURL: "https://api.openai.iniad.org/api/v1",
         path: "models",
       })
     ).rejects.toMatchObject({ kind: "http", status: 401 });
@@ -49,7 +62,7 @@ describe("api-client", () => {
     try {
       await apiRequestJson({
         apiKey: "sk-secret-value",
-        baseURL: "https://api.example.com/v1",
+        baseURL: "https://api.openai.iniad.org/api/v1",
         path: "models",
         maxAttempts: 1,
       });
@@ -68,7 +81,7 @@ describe("api-client", () => {
     await expect(
       apiRequestJson<{ data: unknown[] }>({
         apiKey: "test-key",
-        baseURL: "https://api.example.com/v1",
+        baseURL: "https://api.openai.iniad.org/api/v1",
         path: "models",
       })
     ).resolves.toEqual({ data: [] });
@@ -82,7 +95,7 @@ describe("api-client", () => {
     await expect(
       apiRequestJson({
         apiKey: "test-key",
-        baseURL: "https://api.example.com/v1",
+        baseURL: "https://api.openai.iniad.org/api/v1",
         path: "chat/completions",
         method: "POST",
         body: { messages: [] },
@@ -105,7 +118,7 @@ describe("api-client", () => {
 
     const request = apiRequestJson({
       apiKey: "test-key",
-      baseURL: "https://api.example.com/v1",
+      baseURL: "https://api.openai.iniad.org/api/v1",
       path: "models",
       signal: controller.signal,
       maxAttempts: 1,
@@ -131,7 +144,7 @@ describe("api-client", () => {
     await expect(
       apiRequestJson({
         apiKey: "test-key",
-        baseURL: "https://api.example.com/v1",
+        baseURL: "https://api.openai.iniad.org/api/v1",
         path: "models",
         timeoutMs: 0,
         maxAttempts: 1,

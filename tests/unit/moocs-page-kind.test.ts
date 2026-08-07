@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   getMoocsPageKind,
+  inferMoocsLocation,
   isGoogleSlidePage,
   pageCitationTitle,
 } from "../../src/main/services/moocs-page-kind";
@@ -18,7 +19,9 @@ describe("moocs-page-kind", () => {
       expect(getMoocsPageKind("https://moocs.iniad.org/courses/2026/COS201/01/atnd")).toBe(
         "attendance"
       );
-      expect(isGoogleSlidePage("https://moocs.iniad.org/courses/2026/COS201/01/review")).toBe(false);
+      expect(isGoogleSlidePage("https://moocs.iniad.org/courses/2026/COS201/01/review")).toBe(
+        false
+      );
     });
   });
 
@@ -29,6 +32,20 @@ describe("moocs-page-kind", () => {
       );
       expect(pageCitationTitle("https://moocs.iniad.org/courses/2026/COS201/01/01")).toBe(
         "MOOCs スライド"
+      );
+    });
+  });
+
+  describe("inferMoocsLocation", () => {
+    it("uses the same localized locations for slides and HTML learning pages", () => {
+      expect(inferMoocsLocation("https://moocs.iniad.org/courses/2026/COS201/01/02")).toBe(
+        "第1回 / 資料2"
+      );
+      expect(inferMoocsLocation("https://moocs.iniad.org/courses/2026/COS201/01/review")).toBe(
+        "第1回 / 課題解説"
+      );
+      expect(inferMoocsLocation("https://moocs.iniad.org/courses/2026/COS201/01/exercise")).toBe(
+        "第1回 / 演習課題"
       );
     });
   });

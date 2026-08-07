@@ -38,3 +38,27 @@ export function pageCitationTitle(url: string): string {
       return "MOOCs";
   }
 }
+
+/** MOOCs URL から引用表示用の講義回・資料位置を推定する。 */
+export function inferMoocsLocation(url: string): string | undefined {
+  try {
+    const parts = new URL(url).pathname.replace(/\/$/, "").split("/");
+    const coursesIndex = parts.indexOf("courses");
+    const lecture = coursesIndex >= 0 ? parts[coursesIndex + 3] : undefined;
+    const page = coursesIndex >= 0 ? parts[coursesIndex + 4] : undefined;
+    if (!lecture) return undefined;
+
+    const formatIndexNumber = (value: string): string => {
+      const parsed = Number.parseInt(value, 10);
+      return Number.isFinite(parsed) ? String(parsed) : value;
+    };
+    const lectureLabel = `第${formatIndexNumber(lecture)}回`;
+    if (!page) return lectureLabel;
+    if (/^\d+$/.test(page)) return `${lectureLabel} / 資料${formatIndexNumber(page)}`;
+    if (page === "review") return `${lectureLabel} / 課題解説`;
+    if (page === "exercise") return `${lectureLabel} / 演習課題`;
+    return lectureLabel;
+  } catch {
+    return undefined;
+  }
+}

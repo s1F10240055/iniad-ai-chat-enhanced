@@ -25,6 +25,19 @@ export interface Citation {
   url: string;
   /** 関連部分のスニペット */
   snippet?: string;
+  /** 資料内の位置（例: 第1回 / スライド1） */
+  location?: string;
+  /** 出典種別 */
+  sourceType?: "moocs" | "web";
+}
+
+/** Renderer に公開する資料コンテキストの概要（本文は Main 内だけで保持） */
+export interface MaterialContextSummary {
+  id: string;
+  title: string;
+  url: string;
+  location?: string;
+  lastReferencedAt: string;
 }
 
 /** chat:send のレスポンス */
